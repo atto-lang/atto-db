@@ -1,0 +1,50 @@
+name: Actor PostgreSQL host reference
+on:
+  pull_request:
+  push:
+    branches:
+      - "feat/actor-pg-*"
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: local-ephemeral-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Compile Java 21 host contract and integrations
+        run: |
+          mkdir -p build/pg-host
+          javac -d build/pg-host host-reference/src/dev/oreslang/db/*.java host-reference/test/dev/oreslang/db/*.java
+      - name: Deterministic fake-provider tests
+        run: |
+          java -cp build/pg-host dev.oreslang.db.PoolLimitsTest
+          java -cp build/pg-host dev.oreslang.db.ActorPgPoolTest
+      - name: Resolve PostgreSQL JDBC test dependency
+        run: mvn -B -ntp -f host-reference/pom.xml dependency:copy-dependencies -DoutputDirectory="$GITHUB_WORKSPACE/build/pg-jdbc" -DincludeScope=runtime
+      - name: Real PostgreSQL 17 1000-client / 8-connection RLS test
+        env:
+          ORES_TEST_PG_URL: jdbc:postgresql://localhost:5432/postgres
+          ORES_TEST_PG_ADMIN_USER: postgres
+          ORES_TEST_PG_ADMIN_PASSWORD: local-ephemeral-only
+        run: java -cp "build/pg-host:build/pg-jdbc/*" dev.oreslang.db.PostgresIntegrationTest
