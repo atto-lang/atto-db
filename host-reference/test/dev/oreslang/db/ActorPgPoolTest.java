@@ -131,6 +131,20 @@ public final class ActorPgPoolTest {
                 check(futures.get(i).join().rows().get(0).get(0).equals(i%2==0?"tenant-a":"tenant-b"),"1000-client tenant isolation");
             check(load.opened.get()<=8 && load.peak.get()<=8,"8 physical connections");
         }
+        // In-flight SQL can commit despite revocation. Do not deliver a stale
+        // success to the stopped actor; surface an indeterminate outcome.
+        Fake revoker = new Fake();
+        try (ActorPgPool p = pool(revoker, 1, 10, 10)) {
+            var cap = p.grantTenant("tenant-revoked", Set.of("block"));
+            var executing = p.submit(cap, "block", List.of(1));
+            check(revoker.entered.await(5, TimeUnit.SECONDS), "in-flight revocation dispatched");
+            p.revoke(cap);
+            revoker.unblock.countDown();
+            try { executing.get(5, TimeUnit.SECONDS); throw new AssertionError("stale execution succeeded"); }
+            catch (ExecutionException expected) {
+                check(expected.getCause().getMessage().contains("may be committed"), "unknown outcome reported");
+            }
+        }
         System.out.println("ACTOR_PG_POOL_1000_CLIENT_8_CONNECTION_FAKE_PASS");
         System.out.println("ACTOR_PG_POOL_HOST_CONTRACT_PASS");
     }

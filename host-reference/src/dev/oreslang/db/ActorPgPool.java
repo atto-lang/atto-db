@@ -230,8 +230,13 @@ public final class ActorPgPool implements AutoCloseable {
                 }
                 synchronized (gate) { release(completed.job.capability.tenant); }
                 if (!completed.job.completion.isCancelled()) {
-                    if (completed.error == null) completed.job.completion.complete(completed.outcome);
-                    else completed.job.completion.completeExceptionally(completed.error);
+                    // Effects can already have committed. Never deliver stale results
+                    // to a capability revoked while its database work was in flight.
+                    Exception failure = completed.error;
+                    if (completed.job.capability.revoked || closed)
+                        failure = new IllegalStateException("operation owner revoked or pool closed; database outcome may be committed");
+                    if (failure == null) completed.job.completion.complete(completed.outcome);
+                    else completed.job.completion.completeExceptionally(failure);
                 }
             }
         } catch (InterruptedException e) {
