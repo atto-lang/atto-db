@@ -68,6 +68,12 @@ incarnation, native file identity and directory FD. A guest cannot assert
 that the on-disk WAL was synced by supplying equivalent numeric IDs or a
 checksum. The WAL actor must re-check the runtime fence on completion before
 any `Committed` result; a returned `SyncedReceipt` is **not** a DB ACK.
+Asynchronous client continuations are not owned by the disk executor and
+may outlive the file-close boundary. They receive no FileChannel, and the
+future runtime bridge must validate activation generation on every completion
+before using actor state or issuing any commit acknowledgment. The emergency
+handoff-rejection path is fail-closed but does not certify general callback
+quiescence or transport cancellation.
 
 ## Hard prerequisites before promoting this PR
 
