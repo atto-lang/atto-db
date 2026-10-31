@@ -222,6 +222,11 @@ a hosted source CI run or a database durability guarantee. The runtime
 must still use a bounded scheduler with fresh actor/isolate authority
 on every turn and separately fence the final durable ACK.
 
+
+### Registration failure regression
+
+Host-only callback registration now poisons the continuation gate if the underlying CompletionStage throws a RuntimeException or Error. The new regression passed 25 consecutive isolated Java 21 runs with warnings treated as errors. The exact gate and test Git blobs matched 402bf509c31a853ff16bf73a3c2687780225f153 and 8b457d71efe26d95d00b89495daf91e172c39e3c. A local negative control without the poison assignment failed as expected. Existing Context/Owner types were compile-time stand-ins; the full six-suite source and Oreslang guest integration remain unverified.
+
 ## Outstanding risks
 
 - Client code that blocks *all* 32 receipt handoffs waiting for operations
