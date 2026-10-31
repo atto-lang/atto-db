@@ -84,6 +84,13 @@ final class WalActorContinuationGate implements AutoCloseable {
       Runnable notice = () -> {
         if (retired || poisoned || !runtime.isCurrent(context)) return;
         runtime.dispatch(context, () -> {
+          // Reject a broken CallerRuns-style scheduler rather than executing
+          // actor code on this handoff worker. The real runtime must also
+          // verify its own actor-turn identity and generation fencing.
+          if (Thread.currentThread() == dispatcher) {
+            poisoned = true;
+            return;
+          }
           // Recheck at actual actor turn execution, not just dispatch.
           if (!retired && !poisoned && runtime.isCurrent(context))
             continuation.accept(value, error);
