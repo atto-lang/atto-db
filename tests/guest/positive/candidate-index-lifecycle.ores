@@ -14,7 +14,6 @@ pub routine main(): void {
   let second = wal_frame.encode(7, 3, 2, 101, 1, key, value_b);
   let del = wal_frame.encode(7, 4, 3, 102, 2, key, new List<int>());
   let again = wal_frame.encode(7, 4, 4, 103, 1, key, value_a);
-  val again_bytes = again.unwrap();
   let List<int> absent = new List<int>();
   absent.add(108);
   let absent_delete = wal_frame.encode(7, 4, 5, 104, 2, absent, new List<int>());
@@ -22,6 +21,7 @@ pub routine main(): void {
     again.is_err() || absent_delete.is_err(); then
     stdio.stdout.write("db:FAILED"); return;
   fi
+  val again_bytes = again.unwrap();
   if index.apply_candidate(first.unwrap()).is_err(); then
     stdio.stdout.write("db:FAILED"); return;
   fi
