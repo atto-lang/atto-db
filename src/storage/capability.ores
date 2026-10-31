@@ -6,8 +6,7 @@ define module storage_policy as
   // validate the complete wire bytes, and a trusted runtime must authenticate
   // actor, tenant, isolate, activation generation, and storage directory.
   pub fnc validate_frame_request(int tenant, int generation,
-                                 int operation_id, int frame_bytes):
-      Result<int, String> {
+                                 int operation_id, int frame_bytes): Result<int, String> {
     if tenant <= 0 || tenant > 2147483647; then
       return Err("invalid_tenant");
     fi
