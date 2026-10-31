@@ -1,7 +1,10 @@
 package dev.oreslang.db;
 
 import java.sql.*;
-import java.util.UUID;
+import java.lang.reflect.*;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.*;
 
 /**
  * Disposable PostgreSQL 17 role/RLS boundary test.
@@ -71,6 +74,88 @@ public final class PostgresPrincipalIsolationTest {
         }
     }
 
+    /** Source tracks simultaneously live physical JDBC sessions, not cumulative opens. */
+    static final class TrackedSource extends PostgresIntegrationTest.Source {
+        final AtomicInteger active, peak;
+        TrackedSource(String url, String role, String password,
+                      AtomicInteger active, AtomicInteger peak) {
+            super(url, role, password);
+            this.active = active;
+            this.peak = peak;
+        }
+        @Override public Connection getConnection() throws SQLException {
+            Connection real = super.getConnection();
+            int count = active.incrementAndGet();
+            peak.accumulateAndGet(count, Math::max);
+            AtomicBoolean closed = new AtomicBoolean();
+            return (Connection) Proxy.newProxyInstance(Connection.class.getClassLoader(),
+                    new Class<?>[]{Connection.class}, (proxy, method, args) -> {
+                        try {
+                            if (method.getName().equals("close")) {
+                                try { return method.invoke(real, args); }
+                                finally {
+                                    if (closed.compareAndSet(false, true)) active.decrementAndGet();
+                                }
+                            }
+                            return method.invoke(real, args);
+                        } catch (InvocationTargetException e) { throw e.getCause(); }
+                    });
+        }
+    }
+    static void pooledRoleProof(String url, String schema,
+                                String roleA, String passwordA,
+                                String roleB, String passwordB) throws Exception {
+        AtomicInteger active = new AtomicInteger(), peak = new AtomicInteger();
+        TrackedSource sourceA = new TrackedSource(url, roleA, passwordA, active, peak);
+        TrackedSource sourceB = new TrackedSource(url, roleB, passwordB, active, peak);
+        String read = "SELECT tenant_role,actor_id FROM " + schema +
+                      ".actor_state WHERE actor_id=?";
+        String write = "UPDATE " + schema +
+                       ".actor_state SET version=version+1 WHERE actor_id=? AND tenant_role=?";
+        List<ActorPgPool.Template> templates = List.of(
+            new ActorPgPool.Template("read", read, 1, true),
+            new ActorPgPool.Template("write", write, 2, false)
+        );
+        Map<String, ActorPgPool.PrincipalBinding> principals = Map.of(
+            "tenant-a", new ActorPgPool.PrincipalBinding(roleA, sourceA),
+            "tenant-b", new ActorPgPool.PrincipalBinding(roleB, sourceB)
+        );
+        try (ActorPgPool pool = new ActorPgPool(principals, templates,
+                                                8, 1500, 1000, 4, 65536)) {
+            var capA = pool.grantTenant("tenant-a", Set.of("read", "write"));
+            var capB = pool.grantTenant("tenant-b", Set.of("read", "write"));
+            List<CompletableFuture<ActorPgPool.Outcome>> results = new ArrayList<>();
+            for (int i = 0; i < 1000; i++) {
+                var capability = i % 2 == 0 ? capA : capB;
+                results.add(pool.submit(capability, "read", List.of(1 + i % 2)));
+            }
+            CompletableFuture.allOf(results.toArray(CompletableFuture[]::new))
+                             .get(120, TimeUnit.SECONDS);
+            for (int i = 0; i < results.size(); i++) {
+                var rows = results.get(i).join().rows();
+                check(rows.size() == 1, "principal-bound RLS exposed wrong row count");
+                check(rows.get(0).get(0).equals(i % 2 == 0 ? roleA : roleB),
+                      "credential-fenced pool used incorrect PostgreSQL role");
+                check(((Number) rows.get(0).get(1)).intValue() == 1 + i % 2,
+                      "principal-bound pool returned incorrect actor ID");
+            }
+            check(pool.submit(capA, "write", List.of(1, roleB))
+                      .get(15, TimeUnit.SECONDS).updateCount() == 0,
+                  "principal-bound pool modified tenant B as tenant A");
+            check(pool.submit(capB, "write", List.of(1, roleA))
+                      .get(15, TimeUnit.SECONDS).updateCount() == 0,
+                  "principal-bound pool modified tenant A as tenant B");
+            check(pool.submit(capA, "write", List.of(1, roleA))
+                      .get(15, TimeUnit.SECONDS).updateCount() == 1,
+                  "tenant A was denied its own update");
+            check(peak.get() <= 8, "physical session count exceeded eight");
+            pool.close();
+            check(pool.awaitTermination(30, TimeUnit.SECONDS), "connection owners not retired");
+        }
+        check(active.get() == 0, "physical connections leaked at pool shutdown");
+        System.out.println("PG17_PRINCIPAL_FENCED_POOL_1000_CLIENT_8_LIVE_CONNECTIONS_PASS peak=" + peak.get());
+    }
+
     public static void main(String[] args) throws Exception {
         String url = required("ORES_TEST_PG_URL");
         String adminUser = required("ORES_TEST_PG_ADMIN_USER");
@@ -114,6 +199,7 @@ public final class PostgresPrincipalIsolationTest {
                     ".actor_state TO " + roleA + "," + roleB);
                 checkTenant(url, roleA, passwordA, roleB, schema);
                 checkTenant(url, roleB, passwordB, roleA, schema);
+                pooledRoleProof(url, schema, roleA, passwordA, roleB, passwordB);
                 System.out.println("PG17_ROLE_PRINCIPAL_RLS_ISOLATION_PASS");
             } finally {
                 try {
