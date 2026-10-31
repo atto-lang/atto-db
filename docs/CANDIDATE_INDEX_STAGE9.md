@@ -6,8 +6,8 @@
 
 - Each input is decoded and checksum/length validated through `wal_frame.decode`; tenant must equal the index's supplied tenant metadata (which is **not authentication**).
 - Sequence starts at 1 and is consecutive; generations may increase but not regress; operation IDs cannot repeat anywhere in this bounded index.
-- Reject with no index state changes on corrupt frames, gap, owner regression, duplicate op ID, too many distinct key slots or an exceeded value-byte budget.
-- At most **4,096 accepted records**, **128 distinct key slots** (tombstones keep their slots), and **131,072 live value bytes**. Each ODB1 key is 1–64 bytes and each value 0–1,024 bytes, inherited from the codec.
+- Reject with no index state changes on corrupt frames, gap, owner regression, duplicate op ID, too many distinct key slots, an exceeded live-value budget or total WAL-byte budget.
+- At most **1,048,576 cumulative WAL frame bytes**, **4,096 accepted records**, **128 distinct key slots** (tombstones keep their slots), and **131,072 live value bytes**. Each ODB1 key is 1–64 bytes and each value 0–1,024 bytes, inherited from the codec.
 - Repeated PUT overwrites a key and accounts for the old live bytes; DELETE removes the live value but does not add a slot if the key is absent. Every stored byte list and every `candidate_get` result is independently copied.
 - A failed frame must leave the sequence, operation ledger and index unmodified. A failed key-slot-limit frame does not consume its sequence or operation ID, enabling a corrected frame at the same position.
 - `can_acknowledge()` always returns `false`. The API names `apply_candidate` and `candidate_get` intentionally avoid implying committed updates or reads.
@@ -18,6 +18,7 @@ Run `ci/verify-native-candidate-index-stage9.sh` with an independently pinned Or
 
 - `tests/guest/positive/candidate-index-lifecycle.ores` → `db:candidate-index-lifecycle-ok`
 - `tests/guest/negative/candidate-index-rejections.ores` → `db:candidate-index-rejections-ok`
+- `tests/guest/negative/candidate-index-wal-budget.ores` → `db:candidate-index-wal-budget-ok` (937 maximum-sized frames fit; the next does not; a smaller replacement at the same sequence and operation ID succeeds)
 
 These fixtures are **source only until the actual Oreslang compiler executes them**. Host JVM tests, synthetic models or a clean syntax shell check do not constitute guest backend parity.
 
