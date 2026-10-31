@@ -13,10 +13,13 @@ pub routine main(): void {
   if first.is_err() || second.is_err() || third.is_err(); then
     stdio.stdout.write("db:FAILED"); return;
   fi
+  val first_bytes = first.unwrap();
+  val second_bytes = second.unwrap();
+  val third_bytes = third.unwrap();
   let List<int> bytes = new List<int>();
-  for (const b of first.unwrap()) { bytes.add(b); }
-  for (const b of second.unwrap()) { bytes.add(b); }
-  for (const b of third.unwrap()) { bytes.add(b); }
+  for (const b of first_bytes) { bytes.add(b); }
+  for (const b of second_bytes) { bytes.add(b); }
+  for (const b of third_bytes) { bytes.add(b); }
   let all = wal_replay_window.inspect(7, 12, 3, bytes);
   if all.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
   let scanned = all.unwrap();
@@ -38,14 +41,14 @@ pub routine main(): void {
 
   // Missing final checksum byte: report suspicion, not permission to repair.
   let List<int> torn = new List<int>();
-  let int keep = first.unwrap().length + second.unwrap().length +
-    third.unwrap().length - 1;
+  let int keep = first_bytes.length + second_bytes.length +
+    third_bytes.length - 1;
   for (let i = 0; i < keep; i++) { torn.add(bytes.get(i)); }
   let candidate = wal_replay_window.inspect(7, 12, 3, torn);
   if candidate.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
   let partial = candidate.unwrap();
   if !partial.pending_tail || partial.complete_records != 2 ||
-    partial.consumed_bytes != first.unwrap().length + second.unwrap().length ||
+    partial.consumed_bytes != first_bytes.length + second_bytes.length ||
     partial.last_sequence != 13 || partial.last_generation != 3; then
     stdio.stdout.write("db:FAILED"); return;
   fi
