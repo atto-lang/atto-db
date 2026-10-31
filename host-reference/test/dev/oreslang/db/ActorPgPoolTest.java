@@ -166,6 +166,25 @@ public final class ActorPgPoolTest {
                 } catch (IllegalArgumentException expected) { }
             }
         }
+        // Per-value limits alone are insufficient: 64 admitted parameters could
+        // otherwise consume 64 MiB for a single queued request.
+        try (ActorPgPool p = new ActorPgPool(new Fake(), List.of(
+                new ActorPgPool.Template("wide", "SELECT mock", 64, true),
+                new ActorPgPool.Template("read", "SELECT mock", 0, true)),
+                1, 2, 2, 10, 65536)) {
+            var cap = p.grantTenant("tenant-budget", Set.of("wide", "read"));
+            try {
+                p.submit(cap, "wide", Collections.nCopies(64, "x".repeat(16385)));
+                throw new AssertionError("aggregate parameter budget bypass");
+            } catch (IllegalArgumentException expected) { }
+            try {
+                p.submit(cap, "wide", Collections.nCopies(64,
+                         new java.math.BigDecimal(java.math.BigInteger.ONE, Integer.MAX_VALUE)));
+                throw new AssertionError("extreme decimal scale admitted");
+            } catch (IllegalArgumentException expected) { }
+            check(p.submit(cap, "read", List.of()).get(5, TimeUnit.SECONDS).rows().size() == 1,
+                  "rejected argument payload consumed admission");
+        }
         System.out.println("ACTOR_PG_POOL_1000_CLIENT_8_CONNECTION_FAKE_PASS");
         System.out.println("ACTOR_PG_POOL_HOST_CONTRACT_PASS");
     }
