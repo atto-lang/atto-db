@@ -53,6 +53,7 @@ jobs:
           java -cp build/pg-host dev.oreslang.db.ActorPgPoolTest
           java -cp build/pg-host dev.oreslang.db.JdbcRollbackSafetyTest
           java -cp build/pg-host dev.oreslang.db.JdbcTransactionSafetyTest
+          java -cp build/pg-host dev.oreslang.db.ActorPgPrincipalPoolTest
       - name: Resolve PostgreSQL JDBC test dependency
         run: mvn -B -ntp -f host-reference/pom.xml dependency:copy-dependencies -DoutputDirectory="$GITHUB_WORKSPACE/build/pg-jdbc" -DincludeScope=runtime
       - name: Real PostgreSQL 17 1000-client / 8-connection RLS test
