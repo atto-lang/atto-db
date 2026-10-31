@@ -25,6 +25,7 @@ define module db_candidate_index as
     let mut int last_sequence = 0;
     let mut int last_generation = 0;
     let mut int record_count = 0;
+    let mut int accepted_wal_bytes = 0;
     let mut int live_bytes = 0;
     let mut List<int> seen_operations = new List<int>();
     // A bounded, append-only key slot table; deleting does not free a slot,
@@ -47,6 +48,9 @@ define module db_candidate_index as
     pub apply_candidate(mut self)(List<int> bytes): Result<int, String> {
       if self.closed; then return Err("closed"); fi
       if self.record_count >= 4096; then return Err("record_limit"); fi
+      if bytes.length > 1048576 - self.accepted_wal_bytes; then
+        return Err("wal_byte_limit");
+      fi
       let decoded = wal_frame.decode(bytes);
       if decoded.is_err(); then return Err("invalid_frame"); fi
       val frame = decoded.unwrap();
@@ -107,6 +111,7 @@ define module db_candidate_index as
       self.last_sequence = frame.sequence;
       self.last_generation = frame.generation;
       self.record_count = self.record_count + 1;
+      self.accepted_wal_bytes = self.accepted_wal_bytes + bytes.length;
       return Ok(self.last_sequence);
     }
 
@@ -130,6 +135,7 @@ define module db_candidate_index as
     pub last_record_sequence(): int { return self.last_sequence; }
     pub last_owner_generation(): int { return self.last_generation; }
     pub accepted_records(): int { return self.record_count; }
+    pub inspected_wal_bytes(): int { return self.accepted_wal_bytes; }
     pub key_slot_count(): int { return self.keys.length; }
     pub retained_value_bytes(): int { return self.live_bytes; }
     // No public transition to durable/published state exists.
