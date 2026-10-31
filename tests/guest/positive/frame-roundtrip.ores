@@ -1,0 +1,21 @@
+// Exact guest oracle: "db:wal-roundtrip-ok" (no trailing newline).
+import module wal_frame from "../../../src/wal/frame";
+pub routine main(): void {
+  let List<int> key = new List<int>();
+  let List<int> value = new List<int>();
+  key.add(107); value.add(118);
+  val encoded = wal_frame.encode(7, 3, 1, 42, 1, key, value);
+  if encoded.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val decoded = wal_frame.decode(encoded.unwrap());
+  if decoded.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val frame = decoded.unwrap();
+  if frame.tenant != 7 || frame.generation != 3 ||
+    frame.sequence != 1 || frame.operation_id != 42 ||
+    frame.kind != 1 || frame.key.length != 1 ||
+    frame.value.length != 1 ||
+    frame.key.get(0) != 107 || frame.value.get(0) != 118; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  stdio.stdout.write("db:wal-roundtrip-ok");
+  return;
+}

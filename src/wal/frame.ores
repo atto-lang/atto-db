@@ -1,0 +1,141 @@
+// Oreslang WAL v1 frame codec: pure guest code, not a durable storage provider.
+// Bounded, single-record encode/decode. A checksum detects accidental damage;
+// it is not authentication. No filesystem access, ACK or recovery here.
+define module wal_frame as
+  pub define class Frame as
+    pub val int tenant;
+    pub val int generation;
+    pub val int sequence;
+    pub val int operation_id;
+    pub val int kind;
+    pub val List<int> key;
+    pub val List<int> value;
+  end
+
+  fnc valid_bytes(List<int> input): bool {
+    for (const byte of input) {
+      if byte < 0 || byte > 255; then return false; fi
+    }
+    return true;
+  }
+
+  fnc append_u16(List<int> mut output, int number): void {
+    output.add(number - (number / 256) * 256);
+    output.add(number / 256);
+    return;
+  }
+
+  fnc append_u32(List<int> mut output, int number): void {
+    let int rest = number;
+    for (let i = 0; i < 4; i++) {
+      output.add(rest - (rest / 256) * 256);
+      rest = rest / 256;
+    }
+    return;
+  }
+
+  fnc read_u16(List<int> input, int at): int {
+    return input.get(at) + input.get(at + 1) * 256;
+  }
+
+  fnc read_u32(List<int> input, int at): int {
+    return input.get(at) + input.get(at + 1) * 256 +
+      input.get(at + 2) * 65536 + input.get(at + 3) * 16777216;
+  }
+
+  // Adler-32 over the canonical header + payload, capped to 1,114 bytes.
+  // 64-bit int arithmetic is required. Not a cryptographic integrity MAC.
+  fnc checksum(List<int> input, int length): int {
+    let int a = 1;
+    let int b = 0;
+    for (let i = 0; i < length; i++) {
+      a = a + input.get(i);
+      if a >= 65521; then a = a - 65521; fi
+      b = b + a;
+      if b >= 65521; then b = b - 65521; fi
+    }
+    return b * 65536 + a;
+  }
+
+  // Header: ODB1[4], version[1], kind[1], tenant/u32[4],
+  // generation/u32[4], sequence/u32[4], op_id/u32[4],
+  // key_len/u16[2], value_len/u16[2]; then payload, Adler32/u32.
+  // All integers little endian. IDs in 1..2147483647, no wraparound.
+  pub fnc encode(int tenant, int generation, int sequence,
+                 int operation_id, int kind,
+                 List<int> key, List<int> value): Result<List<int>, String> {
+    if tenant <= 0 || tenant > 2147483647 ||
+      generation <= 0 || generation > 2147483647 ||
+      sequence <= 0 || sequence > 2147483647 ||
+      operation_id <= 0 || operation_id > 2147483647; then
+      return Err("invalid_identity_or_sequence");
+    fi
+    if kind != 1 && kind != 2; then return Err("invalid_kind"); fi
+    if key.length <= 0 || key.length > 64 ||
+      value.length > 1024 ||
+      (kind == 2 && value.length != 0); then
+      return Err("invalid_length");
+    fi
+    if !valid_bytes(key) || !valid_bytes(value); then
+      return Err("invalid_byte");
+    fi
+
+    let List<int> output = new List<int>();
+    output.add(79); output.add(68); output.add(66); output.add(49);
+    output.add(1);
+    output.add(kind);
+    append_u32(output, tenant);
+    append_u32(output, generation);
+    append_u32(output, sequence);
+    append_u32(output, operation_id);
+    append_u16(output, key.length);
+    append_u16(output, value.length);
+    for (const b of key) { output.add(b); }
+    for (const b of value) { output.add(b); }
+    append_u32(output, checksum(output, output.length));
+    return Ok(output);
+  }
+
+  pub fnc decode(List<int> input): Result<Frame, String> {
+    if input.length < 31 || input.length > 1118; then
+      return Err("invalid_length");
+    fi
+    if !valid_bytes(input); then return Err("invalid_byte"); fi
+    if input.get(0) != 79 || input.get(1) != 68 ||
+      input.get(2) != 66 || input.get(3) != 49 ||
+      input.get(4) != 1; then return Err("invalid_magic_or_version"); fi
+    let int kind = input.get(5);
+    if kind != 1 && kind != 2; then return Err("invalid_kind"); fi
+    let int tenant = read_u32(input, 6);
+    let int generation = read_u32(input, 10);
+    let int sequence = read_u32(input, 14);
+    let int operation_id = read_u32(input, 18);
+    if tenant <= 0 || tenant > 2147483647 ||
+      generation <= 0 || generation > 2147483647 ||
+      sequence <= 0 || sequence > 2147483647 ||
+      operation_id <= 0 || operation_id > 2147483647; then
+      return Err("invalid_identity_or_sequence");
+    fi
+    let int key_length = read_u16(input, 22);
+    let int value_length = read_u16(input, 24);
+    if key_length <= 0 || key_length > 64 || value_length > 1024 ||
+      (kind == 2 && value_length != 0) ||
+      input.length != 26 + key_length + value_length + 4; then
+      return Err("invalid_length");
+    fi
+    let int payload_end = input.length - 4;
+    if read_u32(input, payload_end) != checksum(input, payload_end); then
+      return Err("checksum_mismatch");
+    fi
+    let List<int> key = new List<int>();
+    let List<int> value = new List<int>();
+    for (let i = 0; i < key_length; i++) {
+      key.add(input.get(26 + i));
+    }
+    for (let i = 0; i < value_length; i++) {
+      value.add(input.get(26 + key_length + i));
+    }
+    return Ok(new Frame(tenant, generation, sequence,
+                        operation_id, kind, key, value));
+  }
+end
