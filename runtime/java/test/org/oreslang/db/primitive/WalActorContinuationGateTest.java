@@ -137,6 +137,54 @@ public final class WalActorContinuationGateTest {
     }
   }
 
+  private static void uncheckedRuntimeErrorPoisons() throws Exception {
+    CountDownLatch lookupEntered = new CountDownLatch(1);
+    AtomicInteger invoked = new AtomicInteger();
+    var broken = new WalActorContinuationGate.RuntimeQueue() {
+      public boolean isCurrent(WalRuntimeGrant.Context context) {
+        lookupEntered.countDown();
+        throw new AssertionError("injected scheduler-isolate failure");
+      }
+      public void dispatch(WalRuntimeGrant.Context context, Runnable action) {
+        invoked.incrementAndGet();
+      }
+    };
+    try (WalActorContinuationGate gate =
+           WalActorContinuationGate.fromTrustedRuntime(CONTEXT, broken)) {
+      gate.register(CONTEXT, CompletableFuture.completedFuture(8), (v, e) -> {
+        throw new AssertionError("guest callback must not run");
+      });
+      waitFor(lookupEntered, "trusted runtime lookup did not execute");
+      for (int i = 0; i < 200 && !gate.isPoisoned(); ++i)
+        Thread.sleep(5);
+      check(gate.isPoisoned(), "scheduler AssertionError lost fail-closed state");
+      check(invoked.get() == 0, "scheduler action escaped failed admission");
+      try {
+        gate.register(CONTEXT, CompletableFuture.completedFuture(9), (v, e) -> {});
+        throw new AssertionError("poisoned scheduler accepted new callback");
+      } catch (RejectedExecutionException expected) { }
+    }
+
+    CountDownLatch dispatchEntered = new CountDownLatch(1);
+    var failedDispatch = new WalActorContinuationGate.RuntimeQueue() {
+      public boolean isCurrent(WalRuntimeGrant.Context context) { return true; }
+      public void dispatch(WalRuntimeGrant.Context context, Runnable action) {
+        dispatchEntered.countDown();
+        throw new AssertionError("injected dispatch backend failure");
+      }
+    };
+    try (WalActorContinuationGate gate =
+           WalActorContinuationGate.fromTrustedRuntime(CONTEXT, failedDispatch)) {
+      gate.register(CONTEXT, CompletableFuture.completedFuture(10), (v, e) -> {
+        throw new AssertionError("guest callback must not run");
+      });
+      waitFor(dispatchEntered, "broken dispatch not reached");
+      for (int i = 0; i < 200 && !gate.isPoisoned(); ++i)
+        Thread.sleep(5);
+      check(gate.isPoisoned(), "dispatch AssertionError lost fail-closed state");
+    }
+  }
+
   private static void boundedQueuePoisons() throws Exception {
     CountDownLatch occupied = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
@@ -179,6 +227,7 @@ public final class WalActorContinuationGateTest {
     staleDeliveryFailsClosed();
     rejectedRuntimePoisons();
     callerRunsRejected();
+    uncheckedRuntimeErrorPoisons();
     boundedQueuePoisons();
     System.out.println("HOST_WAL_ACTOR_CONTINUATION_GATE_PASS (not Oreslang guest)");
   }
