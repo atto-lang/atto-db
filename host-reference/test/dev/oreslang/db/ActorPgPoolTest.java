@@ -145,6 +145,27 @@ public final class ActorPgPoolTest {
                 check(expected.getCause().getMessage().contains("may be committed"), "unknown outcome reported");
             }
         }
+        // A dequeued operation may already commit; cancel(true) must not tell
+        // callers it was aborted. The completion still carries the real outcome.
+        Fake inFlight = new Fake();
+        try (ActorPgPool p = pool(inFlight, 1, 2, 2)) {
+            var cap = p.grantTenant("tenant-inflight", Set.of("block"));
+            var running = p.submit(cap, "block", List.of(1));
+            check(inFlight.entered.await(5, TimeUnit.SECONDS), "in-flight job claimed");
+            check(!running.cancel(true), "in-flight cancellation claimed successful abort");
+            inFlight.unblock.countDown();
+            check(running.get(5, TimeUnit.SECONDS).updateCount() == 1,
+                  "in-flight completion was lost after declined cancellation");
+        }
+        // Tenant tokens are host-issued IDs, not arbitrary control characters.
+        try (ActorPgPool p = pool(new Fake(), 1, 2, 2)) {
+            for (String invalid : List.of("tenant\\nx", "tenant\\rx", "tenant\\u0000x")) {
+                try {
+                    p.grantTenant(invalid, Set.of("read"));
+                    throw new AssertionError("control character in tenant token accepted");
+                } catch (IllegalArgumentException expected) { }
+            }
+        }
         System.out.println("ACTOR_PG_POOL_1000_CLIENT_8_CONNECTION_FAKE_PASS");
         System.out.println("ACTOR_PG_POOL_HOST_CONTRACT_PASS");
     }
