@@ -110,15 +110,17 @@ final class WalFilePrimitive {
       thread.setDaemon(true);
       return thread;
     };
-    ThreadFactory handoffThreads = task -> {
-      Thread thread = new Thread(task, "ores-db-wal-handoff");
-      thread.setDaemon(true);
-      return thread;
-    };
     diskWorker = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.SECONDS,
         new ArrayBlockingQueue<>(MAX_OUTSTANDING), diskThreads,
         new ThreadPoolExecutor.AbortPolicy()); // NEVER CallerRunsPolicy
-    handoffWorker = Executors.newSingleThreadExecutor(handoffThreads);
+    // A single handoff thread can deadlock when a completion continuation
+    // waits for another already-admitted WAL completion. Give each accepted
+    // receipt an independent virtual-thread handoff. Every handoff retains
+    // its admission slot until its synchronous callbacks return, so the
+    // existing MAX_OUTSTANDING=32 bound also caps concurrent handoffs.
+    // No task runs on the disk worker or a caller/actor carrier.
+    handoffWorker = Executors.newThreadPerTaskExecutor(
+        Thread.ofVirtual().name("ores-db-wal-handoff-", 0).factory());
   }
 
   /** Package-local entrypoint: runtime passes an already-authorized FD. */
