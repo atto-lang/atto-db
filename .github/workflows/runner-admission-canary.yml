@@ -3,6 +3,11 @@ on:
   pull_request:
     paths:
       - '.github/workflows/runner-admission-canary.yml'
+  push:
+    branches:
+      - 'feat/actor-pg-shared-pool-host-contract-20261020'
+    paths:
+      - '.github/workflows/runner-admission-canary.yml'
   workflow_dispatch:
 permissions: {}
 jobs:
