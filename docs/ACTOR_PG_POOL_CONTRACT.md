@@ -14,7 +14,7 @@ Status: **design contract plus Java 21 JDBC host-reference prototype on this dra
 - Fixed physical connection budget; each controller drives one connection.
 - Bounded global and per-tenant outstanding jobs **including executing work**, bounded rows and bytes, and fair admission across tenant queues. Treat backpressure as retryable without manufacturing a new durable operation ID.
 - Suspend actor tasks rather than blocking actor scheduler worker threads. A JDBC reference may use separate blocking host threads; production async should use reactor-driven nonblocking I/O and pipeline only across explicit safe protocol synchronization points.
-- Cancel queued jobs promptly; in-flight cancellation and connection retirement must be explicit. Never release capacity before the physical operation is complete.
+- Cancel queued jobs promptly and release their admission slots exactly once. Once a JDBC owner dequeues work, `cancel()` must return `false`: it cannot certify query cancellation. Allow the completion to report the actual outcome. A revocation or shutdown after dispatch produces an indeterminate outcome, even if the SQL might already have committed. Never release an in-flight admission slot until its physical operation completes. A future native driver may support physical cancellation only with connection/protocol retirement and explicit unknown-outcome reporting.
 - Never run guest callbacks or continuation resumption inline on the connection/protocol owner. Actor completion identity must include generation/activation checks to discard stale responses.
 
 ## Transactions and failure
