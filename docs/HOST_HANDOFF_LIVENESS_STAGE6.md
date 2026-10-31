@@ -160,6 +160,73 @@ test; the full current Java primitive/grant/host CI matrix was **not**
 compiled or executed in this local test. The exact-HEAD GitHub Actions
 runner in the source organization is still blocked at admission.
 
+
+### Deferred actor-turn failure after successful scheduler admission (additional P0)
+
+A two-phase scheduler check can succeed before a receipt is enqueued and
+later throw when that continuation runs on the actor's own execution thread.
+An exception thrown in this **later** turn is outside the virtual bridge
+dispatcher's catch block. Previously, this lost the callback but left
+`WalActorContinuationGate.isPoisoned()` false: fail-closed runtime
+integrations could incorrectly treat the gate as healthy.
+
+The actor-turn wrapper now catches `RuntimeException | Error` around its
+second `runtime.isCurrent(context)` check **and the actual continuation**,
+poisons the gate, then rethrows for the owning runtime to handle. It never
+converts that failure into an authenticated storage receipt or ACK.
+
+`WalActorContinuationGateTest.deferredActorFailurePoisons` covers both an
+activation check that throws **after** queue admission and a guest callback
+that throws after a successful activation check. It asserts the gate is
+poisoned and refuses subsequent registration. The committed source blobs
+were locally reconstructed and checked using `git hash-object`:
+- `WalActorContinuationGate.java` `58a968257599c179a24974564c7519e30cc1338b`
+- `WalActorContinuationGateTest.java` `e7bcf30f9c65e4cfa2ccae1d0adeb8fc04f78c1e`.
+
+Both files compiled on local OpenJDK 21 with `-Xlint:all -Werror`
+using only minimal existing-type stand-ins and the actual byte-exact new
+source/test. **20/20 regression runs passed**. A red control reverting
+just the deferred actor-turn catch **failed as expected** with
+`AssertionError: deferred activation failure left gate healthy`.
+This is local source-targeted Java evidence, **not** a complete exact-head
+PR13 six-suite build, a guest scheduler test or a crash-durability claim.
+
+## Stale-generation receipt drop is a poisoned gate (2026-10-31)
+
+P0 fail-closed correction in `WalActorContinuationGate`: both the gate
+dispatcher's initial `RuntimeQueue.isCurrent(context)` check and the
+deferred actor-turn second check previously returned silently when stale.
+This discarded a WAL result **without poisoning** a gate that might later
+be used for committed-state publication or an ACK. An expired actor
+activation is not proof that the underlying physical WAL append did not
+occur. The gate now poisons itself on either stale-generation check,
+refuses new registration and does not execute the unauthorizable callback.
+
+`WalActorContinuationGateTest` covers stale generation before dispatch,
+stale generation after scheduler enqueue, and rejection of subsequent
+registrations. The *new* stale-actor assertion was first run against
+the previous gate implementation and failed deliberately with
+`AssertionError: stale generation silently discarded sync evidence`.
+The corrected source and tests were then independently read back from
+GitHub and matched against locally executed Git blobs:
+- `WalActorContinuationGate.java`: `b3a12e76be3f77cddc05fd164d9beb462a995c84`
+- `WalActorContinuationGateTest.java`: `b089da66b24b9a304370f8b454de412a891a7158`.
+
+Local OpenJDK 21.0.12.1 compiled both unchanged GitHub files with
+`javac -Xlint:all -Werror` against **minimal host-only stand-ins**
+for their surrounding runtime types; **100/100 executions passed**
+the `HOST_WAL_ACTOR_CONTINUATION_GATE_PASS (not Oreslang guest)` oracle.
+This specifically validates the gate's local logic, **not** an exact-head
+six-suite build with the real runtime, the real actor admission system,
+a hosted source CI run or a database durability guarantee. The runtime
+must still use a bounded scheduler with fresh actor/isolate authority
+on every turn and separately fence the final durable ACK.
+
+
+### Registration failure regression
+
+Host-only callback registration now poisons the continuation gate if the underlying CompletionStage throws a RuntimeException or Error. The new regression passed 25 consecutive isolated Java 21 runs with warnings treated as errors. The exact gate and test Git blobs matched 402bf509c31a853ff16bf73a3c2687780225f153 and 8b457d71efe26d95d00b89495daf91e172c39e3c. A local negative control without the poison assignment failed as expected. Existing Context/Owner types were compile-time stand-ins; the full six-suite source and Oreslang guest integration remain unverified.
+
 ## Outstanding risks
 
 - Client code that blocks *all* 32 receipt handoffs waiting for operations
