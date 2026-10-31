@@ -118,6 +118,25 @@ public final class WalActorContinuationGateTest {
     }
   }
 
+  private static void callerRunsRejected() throws Exception {
+    AtomicInteger called = new AtomicInteger();
+    var callerRuns = new WalActorContinuationGate.RuntimeQueue() {
+      public boolean isCurrent(WalRuntimeGrant.Context ctx) { return true; }
+      public void dispatch(WalRuntimeGrant.Context ctx, Runnable task) {
+        task.run(); // broken actor scheduler, not an authorized actor turn
+      }
+    };
+    try (WalActorContinuationGate gate =
+           WalActorContinuationGate.fromTrustedRuntime(CONTEXT, callerRuns)) {
+      gate.register(CONTEXT, CompletableFuture.completedFuture(22),
+          (v, e) -> called.incrementAndGet());
+      for (int i = 0; i < 200 && !gate.isPoisoned(); ++i)
+        Thread.sleep(5);
+      check(gate.isPoisoned(), "CallerRuns runtime was not quarantined");
+      check(called.get() == 0, "guest callback ran on handoff dispatcher");
+    }
+  }
+
   private static void boundedQueuePoisons() throws Exception {
     CountDownLatch occupied = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
@@ -159,6 +178,7 @@ public final class WalActorContinuationGateTest {
     earlyAndLate();
     staleDeliveryFailsClosed();
     rejectedRuntimePoisons();
+    callerRunsRejected();
     boundedQueuePoisons();
     System.out.println("HOST_WAL_ACTOR_CONTINUATION_GATE_PASS (not Oreslang guest)");
   }
