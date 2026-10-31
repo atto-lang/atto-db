@@ -154,7 +154,14 @@ public final class ActorPgPool implements AutoCloseable {
         if (t == null || arguments.size() != t.parameters())
             throw new IllegalArgumentException("unknown template or parameter count");
         List<Object> snapshot = new ArrayList<>(arguments.size());
-        for (Object v : arguments) snapshot.add(ActorPgValues.copyValue(v));
+        long encodedBytes = 0;
+        for (Object v : arguments) {
+            Object copied = ActorPgValues.copyValue(v);
+            encodedBytes += ActorPgValues.estimatedArgumentBytes(copied);
+            if (encodedBytes > 1024L * 1024L)
+                throw new IllegalArgumentException("aggregate database argument budget exceeded");
+            snapshot.add(copied);
+        }
         Submission promise = new Submission();
         Job job = new Job(capability, t, Collections.unmodifiableList(snapshot), promise);
         promise.job = job;
