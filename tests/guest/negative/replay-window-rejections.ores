@@ -1,0 +1,71 @@
+// Valid-looking corruptions must be rejected; never skip mid-log damage.
+// Exact stdout db:replay-rejections-ok
+import module wal_frame from "../../../src/wal/frame";
+import module wal_replay_window from "../../../src/wal/replay_window";
+pub routine main(): void {
+  let List<int> key = new List<int>();
+  let List<int> value = new List<int>();
+  key.add(107); value.add(118);
+  let a = wal_frame.encode(7, 3, 1, 42, 1, key, value);
+  let b = wal_frame.encode(7, 3, 2, 43, 1, key, value);
+  let gap = wal_frame.encode(7, 3, 3, 43, 1, key, value);
+  let duplicate = wal_frame.encode(7, 3, 2, 42, 1, key, value);
+  let foreign = wal_frame.encode(8, 3, 2, 43, 1, key, value);
+  let old = wal_frame.encode(7, 2, 2, 43, 1, key, value);
+  if a.is_err() || b.is_err() || gap.is_err() ||
+    duplicate.is_err() || foreign.is_err() || old.is_err(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  let List<int> corrupt_middle = new List<int>();
+  let List<int> invalid_magic = new List<int>();
+  for (let i = 0; i < a.unwrap().length; i++) {
+    if i == 26; then corrupt_middle.add(108);
+    else corrupt_middle.add(a.unwrap().get(i)); fi
+    if i == 0; then invalid_magic.add(0);
+    else invalid_magic.add(a.unwrap().get(i)); fi
+  }
+  for (const byte of b.unwrap()) { corrupt_middle.add(byte); }
+  let List<int> bad_sequence = new List<int>();
+  let List<int> bad_operation = new List<int>();
+  let List<int> bad_tenant = new List<int>();
+  let List<int> bad_generation = new List<int>();
+  for (const byte of a.unwrap()) {
+    bad_sequence.add(byte);
+    bad_operation.add(byte);
+    bad_tenant.add(byte);
+    bad_generation.add(byte);
+  }
+  for (const byte of gap.unwrap()) { bad_sequence.add(byte); }
+  for (const byte of duplicate.unwrap()) { bad_operation.add(byte); }
+  for (const byte of foreign.unwrap()) { bad_tenant.add(byte); }
+  for (const byte of old.unwrap()) { bad_generation.add(byte); }
+
+  let List<int> short_tail = new List<int>();
+  for (const byte of a.unwrap()) { short_tail.add(byte); }
+  short_tail.add(79); short_tail.add(68);
+
+  let List<int> over = new List<int>();
+  for (let i = 0; i < 35777; i++) { over.add(0); }
+
+  let List<int> malformed_byte = new List<int>();
+  for (let i = 0; i < a.unwrap().length; i++) {
+    if i == 20; then malformed_byte.add(256);
+    else malformed_byte.add(a.unwrap().get(i)); fi
+  }
+  if wal_replay_window.inspect(7, 1, 0, corrupt_middle).is_ok() ||
+    wal_replay_window.inspect(7, 1, 0, invalid_magic).is_ok() ||
+    wal_replay_window.inspect(7, 1, 0, bad_sequence).is_ok() ||
+    wal_replay_window.inspect(7, 1, 0, bad_operation).is_ok() ||
+    wal_replay_window.inspect(7, 1, 0, bad_tenant).is_ok() ||
+    wal_replay_window.inspect(7, 1, 3, bad_generation).is_ok() ||
+    wal_replay_window.inspect(7, 1, 0, short_tail).is_ok() ||
+    wal_replay_window.inspect(7, 1, 0, over).is_ok() ||
+    wal_replay_window.inspect(7, 1, 0, malformed_byte).is_ok() ||
+    wal_replay_window.inspect(0, 1, 0, a.unwrap()).is_ok() ||
+    wal_replay_window.inspect(7, 0, 0, a.unwrap()).is_ok() ||
+    wal_replay_window.inspect(7, 1, -1, a.unwrap()).is_ok(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  stdio.stdout.write("db:replay-rejections-ok");
+  return;
+}
