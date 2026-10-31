@@ -13,4 +13,21 @@ java -cp build/pg-host dev.oreslang.db.ActorPgPoolTest
 
 Admission additionally caps the aggregate estimated parameter payload at 1 MiB per submission (not 1 MiB per parameter) and rejects extreme decimal scales. This is a host-reference bound, not a complete heap-usage bound; concurrency budgets, credential isolation, transport timeouts and server-side resource limits still apply.
 
+**Database-principal isolation experiment (not wired into ActorPgPool):**
+`PostgresPrincipalIsolationTest` creates two fresh, unrelated LOGIN roles on a
+disposable PostgreSQL 17 instance. It uses `current_user` in a FORCE RLS policy
+to test that cross-tenant reads and updates return zero rows; the roles cannot
+`SET ROLE` to one another or modify row ownership, and changing
+`ores.tenant_id` must not alter access. Run it separately from
+`PostgresIntegrationTest` because the latter still uses **one shared DB role
+and a spoofable tenant GUC**. These two tests have different security claims.
+The separate-role test exercises database SQL/roles; it does **not** establish
+per-tenant pool ownership or prove guest integration.
+
+CI pins the pull request's **head SHA**, verifies the clean checked-out Git
+tree, prints Java source digests and runs both PostgreSQL tests in separate
+steps. A failed job with `steps=[]` is admission failure, not test evidence.
+The two database tests must run only against the disposable GitHub PostgreSQL
+service or a dedicated disposable local instance with CREATE ROLE privileges.
+
 Important restrictions: no Oreslang guest binding, GraalVM or LLVM backend integration yet; no true async protocol, pipeline or streaming result protocol. JDBC blocks dedicated host worker threads, not the Oreslang scheduler; its driver socket timeout must also be configured. Arbitrary guest SQL and credential export are forbidden. The test RLS policy depends on a transaction-local custom GUC set by the trusted host. PostgreSQL custom GUCs are settable by a client with the database credential: this does **not** independently authenticate a tenant if that role or SQL-template registry is compromised. Production requires a non-spoofable tenant identity boundary (e.g. distinct least-privilege database roles or an audited privileged tenant binding) and adversarial proof. Unknown COMMIT results must not be retried blindly.
