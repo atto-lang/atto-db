@@ -235,6 +235,38 @@ public final class WalFilePrimitiveTest {
     owner.revokeAndCloseAsync().toCompletableFuture().join();
   }
 
+  private static void testRejectedHandoffNeverRunsOnDiskWorker(Path dir) throws Exception {
+    Path wal = dir.resolve("handoff-rejected.wal");
+    CountDownLatch atForce = new CountDownLatch(1);
+    CountDownLatch proceed = new CountDownLatch(1);
+    var injected = new WalFilePrimitive.IoHooks() {
+      public void beforeAppend() { }
+      public void force(FileChannel file) throws IOException {
+        file.force(true);
+        atForce.countDown();
+        try { if (!proceed.await(10, TimeUnit.SECONDS)) throw new IOException("hook timeout"); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IOException(e); }
+      }
+    };
+    var owner = WalFilePrimitive.forNativeFaultTest(newWal(wal), OWNER, injected);
+    var ticket = owner.appendAndSync(OWNER, put(1, 53));
+    var callback = ticket.handle((receipt, error) -> Thread.currentThread().getName());
+    check(atForce.await(5, TimeUnit.SECONDS), "sync finished before handoff rejection");
+    var handoff = WalFilePrimitive.class.getDeclaredField("handoffWorker");
+    handoff.setAccessible(true);
+    ((java.util.concurrent.ExecutorService) handoff.get(owner)).shutdown();
+    proceed.countDown();
+    check(failure(ticket) instanceof WalFilePrimitive.UnknownOutcome,
+          "rejected receipt handoff has unknown outcome");
+    check(callback.toCompletableFuture().join().startsWith("ores-db-wal-handoff-emergency"),
+          "rejected handoff callbacks must not run on disk owner");
+    check(Arrays.equals(Files.readAllBytes(wal), put(1, 53)),
+          "handoff failure preserves synced bytes for reconciliation");
+    denied(RejectedExecutionException.class,
+          () -> owner.appendAndSync(OWNER, put(2, 54)));
+    owner.revokeAndCloseAsync().toCompletableFuture().join();
+  }
+
   // A real *separate operating-system process* is killed after force(true)
   // has returned. This does not simulate loss of power or prove a DB ACK.
   private static void testProcessKillAfterSync(Path dir) throws Exception {
@@ -274,6 +306,7 @@ public final class WalFilePrimitiveTest {
       testQueuedAfterFailure(dir);
       testQueuedLimitAndRevocation(dir);
       testCopyBeforeDispatch(dir);
+      testRejectedHandoffNeverRunsOnDiskWorker(dir);
       testProcessKillAfterSync(dir);
       System.out.println("HOST_JAVA_PRIMITIVE_PASS assertions=" + assertions + " (not Oreslang guest; process-kill post-sync only)");
     } finally {
