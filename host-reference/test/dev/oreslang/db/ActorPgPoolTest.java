@@ -159,7 +159,7 @@ public final class ActorPgPoolTest {
         }
         // Tenant tokens are host-issued IDs, not arbitrary control characters.
         try (ActorPgPool p = pool(new Fake(), 1, 2, 2)) {
-            for (String invalid : List.of("tenant\\nx", "tenant\\rx", "tenant\\u0000x")) {
+            for (String invalid : List.of("tenant\nx", "tenant\rx", "tenant\u0000x")) {
                 try {
                     p.grantTenant(invalid, Set.of("read"));
                     throw new AssertionError("control character in tenant token accepted");
