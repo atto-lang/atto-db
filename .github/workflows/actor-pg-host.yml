@@ -28,6 +28,17 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert checkout is exact workflow head
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "source_commit=$(git rev-parse HEAD)"
+          echo "source_tree=$(git rev-parse HEAD^{tree})"
+          sha256sum host-reference/src/dev/oreslang/db/*.java host-reference/test/dev/oreslang/db/*.java
       - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
         with:
           distribution: temurin
@@ -51,4 +62,9 @@ jobs:
           ORES_TEST_PG_ADMIN_PASSWORD: local-ephemeral-only
         run: |
           java -cp "build/pg-host:build/pg-jdbc/*" dev.oreslang.db.PostgresIntegrationTest
-          java -cp "build/pg-host:build/pg-jdbc/*" dev.oreslang.db.PostgresPrincipalIsolationTest
+      - name: Real PostgreSQL 17 distinct-role RLS proof (not pool wiring)
+        env:
+          ORES_TEST_PG_URL: jdbc:postgresql://localhost:5432/postgres?connectTimeout=10&socketTimeout=40
+          ORES_TEST_PG_ADMIN_USER: postgres
+          ORES_TEST_PG_ADMIN_PASSWORD: local-ephemeral-only
+        run: java -cp "build/pg-host:build/pg-jdbc/*" dev.oreslang.db.PostgresPrincipalIsolationTest
