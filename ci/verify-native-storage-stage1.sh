@@ -47,3 +47,29 @@ if ! cmp -s "$tmp/expected" "$tmp/actual"; then
 fi
 echo 'STORAGE_ADMISSION_GUEST_EXECUTED_PASS cases=1'
 echo 'CODEC_PLUS_ADMISSION_ONLY; NO DURABLE_STORAGE_OR_AUTHORITY_CLAIM'
+
+# Entire-frame guest admission gate; still deliberately no storage receipt,
+# fsync, ACK, runtime-issued file handle or crash-recovery proof.
+file=tests/guest/positive/wal-frame-admission-only.ores
+printf 'WAL_FRAME_ADMISSION_FIXTURE_SHA256='
+sha256sum "$file"
+timeout 20s "$ORESLANG_BIN" --check "$file" \
+  >"$tmp/wal-admission-check.out" 2>"$tmp/wal-admission-check.err" || {
+  echo "FAILED WAL frame admission guest compile" >&2
+  cat "$tmp/wal-admission-check.err" >&2
+  exit 1
+}
+timeout 20s "$ORESLANG_BIN" "$file" \
+  >"$tmp/wal-admission.actual" 2>"$tmp/wal-admission.err" || {
+  echo "FAILED WAL frame admission guest execute" >&2
+  cat "$tmp/wal-admission.err" >&2
+  exit 1
+}
+printf '%s' 'db:wal-prepared-only-ok' >"$tmp/wal-admission.expected"
+if ! cmp -s "$tmp/wal-admission.expected" "$tmp/wal-admission.actual"; then
+  echo "FAILED WAL frame admission exact stdout" >&2
+  cat "$tmp/wal-admission.err" >&2
+  exit 1
+fi
+echo 'WAL_FRAME_ADMISSION_GUEST_EXECUTED_PASS cases=1'
+echo 'GUEST_PREPARATION_ONLY; NO DURABLE_WAL_ACK_OR_REPLAY'
