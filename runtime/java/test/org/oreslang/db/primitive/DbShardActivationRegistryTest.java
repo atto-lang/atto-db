@@ -3,6 +3,8 @@ package org.oreslang.db.primitive;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -107,6 +109,10 @@ public final class DbShardActivationRegistryTest {
         rejects(() -> h.registry.activateFresh(key,3,channel), SecurityException.class,
             "untrusted runtime cannot issue a grant");
         h.permit.set(true);
+        try (FileLock probe = channel.tryLock()) {
+          check(probe != null && probe.isValid(),
+                "denied admission never leaves an OS lease behind");
+        }
         var first = h.registry.activateFresh(key,3,channel);
         h.current.set(first);
         check(first.generation()==3 && first.key().equals(key),"bound shard identity");
@@ -117,6 +123,14 @@ public final class DbShardActivationRegistryTest {
         var otherKey = new DbShardActivationRegistry.ShardKey(7,11,6);
         rejects(() -> h.registry.activateFresh(otherKey,3,channel),
             RejectedExecutionException.class, "same Java FD cannot be leased twice");
+        try (FileChannel alias = FileChannel.open(wal,
+            StandardOpenOption.READ, StandardOpenOption.WRITE)) {
+          rejects(() -> h.registry.activateFresh(otherKey,3,alias),
+              RejectedExecutionException.class,
+              "distinct Java descriptor for same inode cannot acquire lease");
+          rejects(() -> alias.tryLock(), OverlappingFileLockException.class,
+              "active shard actually holds a real OS advisory lock");
+        }
         rejects(() -> first.getOnActorTurn(new byte[]{107}), SecurityException.class,
             "nonactor caller refused");
         check(h.onActor(() -> first.getOnActorTurn(new byte[]{107})).isEmpty(),
@@ -139,9 +153,25 @@ public final class DbShardActivationRegistryTest {
         rejects(() -> h.registry.activateFresh(key,3,channel),
             IllegalArgumentException.class, "closed FD cannot be reactivated");
       }
+      try(FileChannel afterClose = FileChannel.open(wal,
+          StandardOpenOption.READ, StandardOpenOption.WRITE);
+          FileLock released = afterClose.tryLock()) {
+        check(released != null && released.isValid(),
+              "async retirement released the OS-level WAL lease");
+      }
       try(FileChannel oldWal = FileChannel.open(wal, StandardOpenOption.READ)) {
         rejects(() -> h.registry.activateFresh(key,4,oldWal),
+            java.nio.channels.NonWritableChannelException.class,
+            "read-only WAL cannot acquire exclusive writer lease");
+      }
+      try (FileChannel oldWalRw = FileChannel.open(wal,
+          StandardOpenOption.READ, StandardOpenOption.WRITE)) {
+        rejects(() -> h.registry.activateFresh(key,4,oldWalRw),
             IllegalArgumentException.class, "nonempty WAL requires authenticated recovery");
+        try (FileLock freed = oldWalRw.tryLock()) {
+          check(freed != null && freed.isValid(),
+                "nonempty WAL rejection released advisory lease");
+        }
       }
       try(FileChannel fresh = FileChannel.open(other,
           StandardOpenOption.READ, StandardOpenOption.WRITE)) {
