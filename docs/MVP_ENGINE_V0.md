@@ -17,6 +17,7 @@ src/query/query_actor.ores          TODO: typed get/put/delete API/coordinator
 src/db.ores                         TODO: public API & lifecycle
 tests/guest/positive/frame-roundtrip.ores    PRESENT
 tests/guest/negative/frame-rejections.ores  PRESENT (runtime rejects)
+tests/guest/positive/frame-boundaries.ores PRESENT (high checksum and lengths)
 tests/guest/recovery/*.ores         TODO: actual async storage capability
 tests/native/fault-injection/*      TODO: real crash/persistence provider
 ci/verify-native-wal.sh             PRESENT: fail-closed guest compiler gate
@@ -82,6 +83,10 @@ reinterpretation. Unknown versions and operations fail closed.
 
 The pure codec validates single record length, bounds, marker, version,
 operation type, numeric ranges, bytes and checksum before allocating output.
+Adler-32 writes and verifies A/B as two little-endian u16 limbs, avoiding
+signed-int32 overflow on checksums greater than 0x7fffffff. IDs with their
+high bit set are rejected before signed 32-bit deserialization; decoded
+identities remain limited to 1..2147483647. Do not use the checksum as a MAC.
 It does not parse a WAL stream, retain durable idempotency receipts, detect
 sequence gaps, authenticate tenants, handle checkpoints or prove fsync.
 
@@ -92,7 +97,13 @@ Candidate compiler **source revision**:
 This is a *pin proposal*, not proof that any binary corresponds to it.
 Provision an independent binary, verify its source provenance and
 SHA-256, and set `ORESLANG_BIN` and `ORESLANG_COMPILER_SHA256`.
-Execute `sh ci/verify-native-wal.sh` on a clean, exact HEAD.
+Independently record the *reviewed* exact HEAD commit and tree into
+`DB_EXPECTED_COMMIT` and `DB_EXPECTED_TREE`; do not derive the expected
+pins from the checkout inside the same verification script. The script
+checks both pins, working-directory root, clean status and binary SHA256
+before compiling any fixture. Execute `sh ci/verify-native-wal.sh` on
+that clean exact HEAD. A compiler source commit alone is not an executable
+binary attestation.
 Each case requires successful compiler `--check`, exit=0 from guest,
 and byte-for-byte stdout **without a terminal newline**.
 
@@ -100,10 +111,14 @@ and byte-for-byte stdout **without a terminal newline**.
 | --- | --- | --- | --- |
 | Positive | `tests/guest/positive/frame-roundtrip.ores` | `db:wal-roundtrip-ok` | NOT_EXECUTED |
 | Runtime-negative | `tests/guest/negative/frame-rejections.ores` | `db:wal-rejections-ok` | NOT_EXECUTED |
+| Boundary-positive/negative | `tests/guest/positive/frame-boundaries.ores` | `db:wal-boundaries-ok` | NOT_EXECUTED |
 
 Negative fixture checks torn trailer, payload byte mutation, unknown kind,
 zero tenant/generation/sequence/op ID, nonempty delete value, overlong key,
-overlong value. A test's successful *rejection* is not compiler-negative
+overlong value. The boundary fixture covers a high-bit Adler checksum,
+1,024-byte value, 1,118-byte maximum legal frame, 31-byte DELETE,
+2,147,483,647 identity limit, forbidden signed high-bit ID, trailing byte,
+and malformed byte values. A test's successful *rejection* is not compiler-negative
 evidence, or a durable-storage recovery proof. The runner has no fallback,
 does not auto-fetch a compiler or use a host-language WAL substitute.
 
