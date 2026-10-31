@@ -40,6 +40,25 @@ GitHub Actions run with zero executed steps **do not** establish a passing
 exact-head host test. Retain actual stdout, exit codes, step IDs, tool
 hashes, HEAD/tree, and source blob hashes. Keep the PR draft otherwise.
 
+
+### 32-slot adversarial saturation test (executed locally)
+
+`WalHandoffSaturationTest` attaches 32 synchronous callbacks before allowing
+real FileChannel I/O to proceed. Every callback remains blocked at a separate
+barrier after `force(true)`, so the owner must reject the 33rd operation even
+when all 32 physical writes have completed. Once callbacks are released, the
+33rd operation must be accepted, sync, and produce the expected 33-record WAL
+length. This explicitly tests **slot ownership through callback completion**,
+not just a configured queue capacity. It is a host-only bound, not an actor or
+replay test.
+
+The exact source `WalFilePrimitive.java` and `WalHandoffLivenessTest.java`
+were locally compiled with JDK21 `-Xlint:all -Werror` after Git blob-SHA
+readback; the liveness test passed 25/25 local runs. The new saturation fixture
+passed 12/12 local executions against that byte-exact production source; its
+uploaded Git blob was separately matched to the locally executed fixture.
+GitHub runner evidence and all inherited host suites remain separate gates.
+
 ## Outstanding risks
 
 - Client code that blocks *all* 32 receipt handoffs waiting for operations
