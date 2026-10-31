@@ -125,10 +125,21 @@ final class ShardPublicationGate {
     phase = Phase.PENDING;
     try {
       return writer.appendAndSync(context, frameBytes);
-    } catch (RuntimeException | Error admissionFailure) {
+    } catch (SecurityException | RejectedExecutionException |
+             IllegalArgumentException definitivePreAdmission) {
+      // The current WalRuntimeGrant/WalFilePrimitive contract throws these
+      // only before admitting a disk task (the queue-rejection path rolls
+      // back its admission counters). This is safe to correct/retry.
       pending = null;
       phase = Phase.OPEN;
-      throw admissionFailure;
+      throw definitivePreAdmission;
+    } catch (RuntimeException | Error possiblyAfterDispatch) {
+      // An unexpected failure may have occurred AFTER disk admission.
+      // Returning to OPEN would permit a second frame with the same sequence
+      // despite an uncertain first fsync. Preserve UNKNOWN instead.
+      pending = null;
+      phase = Phase.UNKNOWN;
+      throw possiblyAfterDispatch;
     }
   }
 
