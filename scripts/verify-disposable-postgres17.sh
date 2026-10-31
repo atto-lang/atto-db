@@ -22,7 +22,11 @@ echo "source_commit=$head"
 echo "source_tree=$(git rev-parse HEAD^{tree})"
 
 # The workflow source and fixture files are always taken from tracked Git paths.
-mapfile -d '' -t sources < <(git ls-files -z -- 'host-reference/src/dev/oreslang/db/*.java' 'host-reference/test/dev/oreslang/db/*.java')
+# macOS ships Bash 3.2, which does not provide mapfile.
+sources=()
+while IFS= read -r -d '' source; do
+  sources+=("$source")
+done < <(git ls-files -z -- 'host-reference/src/dev/oreslang/db/*.java' 'host-reference/test/dev/oreslang/db/*.java')
 [[ "${#sources[@]}" -ge 9 ]] || { echo "incomplete Java source inventory" >&2; exit 69; }
 workdir="$(mktemp -d)"
 container=""
