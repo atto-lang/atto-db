@@ -1,0 +1,142 @@
+// Stage 9: pure bounded in-memory ODB1 candidate index, NOT a committed DB.
+// Only a trusted, independently verified complete WAL scan with an exclusive
+// runtime recovery lease may authorize publication. This module CANNOT do so.
+// Never expose this object as an actor DATA capability or count it as an ACK.
+import module wal_frame from "../wal/frame";
+
+define module db_candidate_index as
+  fnc clone_bytes(List<int> original): List<int> {
+    let List<int> copy = new List<int>();
+    for (const b of original) { copy.add(b); }
+    return copy;
+  }
+
+  fnc keys_equal(List<int> left, List<int> right): bool {
+    if left.length != right.length; then return false; fi
+    for (let i = 0; i < left.length; i++) {
+      if left.get(i) != right.get(i); then return false; fi
+    }
+    return true;
+  }
+
+  pub define class CandidateIndex as
+    let int tenant;
+    let mut bool closed = false;
+    let mut int last_sequence = 0;
+    let mut int last_generation = 0;
+    let mut int record_count = 0;
+    let mut int live_bytes = 0;
+    let mut List<int> seen_operations = new List<int>();
+    // A bounded, append-only key slot table; deleting does not free a slot,
+    // avoiding key-order aliasing when replaying a later PUT.
+    let mut List<List<int>> keys = new List<List<int>>();
+    let mut List<List<int>> values = new List<List<int>>();
+    let mut List<bool> present = new List<bool>();
+
+    pub constructor(int tenant) {
+      if tenant <= 0 || tenant > 2147483647; do
+        rt fail("db_candidate_index: invalid trusted tenant metadata");
+      fi
+      self.tenant = tenant;
+    }
+
+    // Input is untrusted candidate data even if its ODB1 checksum validates.
+    // This operation is NOT a durable commit, a WAL sync receipt, a storage
+    // permission grant, or authorization to answer external client queries.
+    // Reject without mutation on any invalid preflight condition.
+    pub apply_candidate(mut self)(List<int> bytes): Result<int, String> {
+      if self.closed; then return Err("closed"); fi
+      if self.record_count >= 4096; then return Err("record_limit"); fi
+      let decoded = wal_frame.decode(bytes);
+      if decoded.is_err(); then return Err("invalid_frame"); fi
+      val frame = decoded.unwrap();
+      if frame.tenant != self.tenant; then return Err("wrong_tenant"); fi
+      if self.last_sequence == 2147483647 ||
+        frame.sequence != self.last_sequence + 1; then
+        return Err("sequence_gap");
+      fi
+      if frame.generation < self.last_generation; then
+        return Err("generation_regression");
+      fi
+      for (const seen of self.seen_operations) {
+        if seen == frame.operation_id; then return Err("duplicate_operation"); fi
+      }
+
+      let int at = -1;
+      for (let i = 0; i < self.keys.length; i++) {
+        if keys_equal(self.keys.get(i), frame.key); then at = i; fi
+      }
+      let int old_size = 0;
+      if at >= 0; then
+        if self.present.get(at); then
+          old_size = self.values.get(at).length;
+        fi
+      fi
+      if frame.kind == 1; then
+        if at < 0 && self.keys.length >= 128; then
+          return Err("key_slot_limit");
+        fi
+        // Signed checked arithmetic: live_bytes <= 131072. Check the
+        // subtraction before addition so no integer overflow is possible.
+        let int remaining = 131072 - (self.live_bytes - old_size);
+        if frame.value.length > remaining; then
+          return Err("value_budget");
+        fi
+      fi
+
+      // All expected error paths are above: no partial state on rejection.
+      if frame.kind == 1; then
+        if at < 0; then
+          self.keys.add(clone_bytes(frame.key));
+          self.values.add(clone_bytes(frame.value));
+          self.present.add(true);
+        else
+          self.values.set(at, clone_bytes(frame.value));
+          self.present.set(at, true);
+        fi
+        self.live_bytes = self.live_bytes - old_size + frame.value.length;
+      else
+        // Deleting an absent key is an accepted no-op, not a new key slot.
+        if at >= 0; then
+          self.values.set(at, new List<int>());
+          self.present.set(at, false);
+          self.live_bytes = self.live_bytes - old_size;
+        fi
+      fi
+      self.seen_operations.add(frame.operation_id);
+      self.last_sequence = frame.sequence;
+      self.last_generation = frame.generation;
+      self.record_count = self.record_count + 1;
+      return Ok(self.last_sequence);
+    }
+
+    // Candidate-only inspection; must not be published as a committed read.
+    pub candidate_get(List<int> key): Result<List<int>, String> {
+      if self.closed; then return Err("closed"); fi
+      if key.length < 1 || key.length > 64; then return Err("invalid_key"); fi
+      for (let i = 0; i < self.keys.length; i++) {
+        if keys_equal(self.keys.get(i), key); then
+          if self.present.get(i); then
+            return Ok(clone_bytes(self.values.get(i)));
+          fi
+          return Err("not_found");
+        fi
+      }
+      return Err("not_found");
+    }
+
+    pub close(mut self)(): void { self.closed = true; return; }
+    pub is_closed(): bool { return self.closed; }
+    pub last_record_sequence(): int { return self.last_sequence; }
+    pub last_owner_generation(): int { return self.last_generation; }
+    pub accepted_records(): int { return self.record_count; }
+    pub key_slot_count(): int { return self.keys.length; }
+    pub retained_value_bytes(): int { return self.live_bytes; }
+    // No public transition to durable/published state exists.
+    pub can_acknowledge(): bool { return false; }
+  end
+
+  pub fnc new_candidate_index(int tenant): CandidateIndex {
+    return new CandidateIndex(tenant);
+  }
+end
