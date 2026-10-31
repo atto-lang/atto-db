@@ -40,6 +40,126 @@ GitHub Actions run with zero executed steps **do not** establish a passing
 exact-head host test. Retain actual stdout, exit codes, step IDs, tool
 hashes, HEAD/tree, and source blob hashes. Keep the PR draft otherwise.
 
+
+### 32-slot adversarial saturation test (executed locally)
+
+`WalHandoffSaturationTest` attaches 32 synchronous callbacks before allowing
+real FileChannel I/O to proceed. Every callback remains blocked at a separate
+barrier after `force(true)`, so the owner must reject the 33rd operation even
+when all 32 physical writes have completed. Once callbacks are released, the
+33rd operation must be accepted, sync, and produce the expected 33-record WAL
+length. This explicitly tests **slot ownership through callback completion**,
+not just a configured queue capacity. It is a host-only bound, not an actor or
+replay test.
+
+The exact source `WalFilePrimitive.java` and `WalHandoffLivenessTest.java`
+were locally compiled with JDK21 `-Xlint:all -Werror` after Git blob-SHA
+readback; the liveness test passed 25/25 local runs. The new saturation fixture
+passed 12/12 local executions against that byte-exact production source; its
+uploaded Git blob was separately matched to the locally executed fixture.
+GitHub runner evidence and all inherited host suites remain separate gates.
+
+
+### Rejected handoff / emergency completion close race (new hardening)
+
+When the normal handoff executor rejects a WAL receipt, its error completion
+runs on a dedicated virtual thread. Previously the original outstanding slot
+was released **before** that emergency callback ran, and the async close path
+awaited only the normal handoff executor. Thus shutdown could resolve and
+close the descriptor while the emergency future was still running user
+callbacks. Receipt delivery no longer had the intended quiescence accounting.
+
+The repaired primitive retains its outstanding slot through emergency
+`completeExceptionally` and all synchronously invoked dependents; both
+normal and emergency paths release slots in `finally` and notify the admission
+monitor. After the disk and normal handoff executors have terminated, close
+now waits for any remaining emergency-owned slots to quiesce (bounded 30s).
+A timeout fails closed and **preserves the open file descriptor**, so its
+owner must not publish a successful close or a durable ACK.
+
+`WalEmergencyQuiescenceTest` uses a real `FileChannel.force(true)` before
+shutting down only the normal handoff executor. Its emergency callback is held
+at a deterministic latch while `revokeAndCloseAsync` runs. The test rejects
+shutdown completion/FD closure before callback release, then requires prompt
+closure after the callback finishes and checks preserved WAL bytes. The
+standalone Java 21 script and GitHub workflow now include this fifth host suite
+with a fixed exact-output oracle.
+
+**Evidence distinction:** this new emergency-close test and revised primitive
+are committed but have **not** yet been verified by a Java 21 source execution
+receipt for this new PR head. Earlier four host-suite passes refer to the
+previous source head. The source org's zero-step Actions admission failures
+are not test evidence. Private alternate-runner execution requires independent
+approval for its *new* source tree and access scope before any source transfer.
+
+### Late subscribers on a completed CompletionStage: caller-carrier hazard
+
+**P0 runtime integration rule:** returning `CompletableFuture.minimalCompletionStage()`
+does **not** ensure callbacks run on the receipt handoff virtual thread.
+If a caller registers synchronous `thenApply`, `handle`, or `whenComplete`
+**after** that stage completed, Java 21 can execute the callback *inline on
+the registering thread*. The host primitive's 32-slot callback bound only
+covers callbacks invoked during the owned completion, not arbitrary late
+continuations attached after the slot is released. Consequently, an actor
+carrier registering a late blocking callback can block itself: the source
+comment "no task runs on a caller/actor carrier" is not a blanket guarantee.
+
+Independently executed a source-free OpenJDK 21 probe using the **same JDK
+`minimalCompletionStage()` operation**: a completed stage's subsequent
+`thenApply` ran on `main`, while `thenApplyAsync` with a dedicated
+virtual-thread executor ran off that thread. This is *JDK behavior evidence*,
+not execution of Oreslang DB's current source or a guest-side integration.
+
+**Required before guest exposure:** never expose the raw Java completion
+stage as an actor-facing suspension contract. The trusted runtime must
+register each guest continuation onto a runtime-owned, bounded, authorized
+scheduler (never a blocking actor carrier), check tenant/actor generation
+at dispatch and immediately before any durable ACK, and handle registration
+both before and after completion plus cancellation/shutdown. Using the
+unqualified common-pool `thenApplyAsync` is not sufficient tenant authority.
+A native guest test must cover both early and late callback registration.
+This remains a non-waivable P0, not a reason to count source-free Java tests
+as Oreslang guest proof.
+
+
+### Host-only actor continuation gate: bounded non-inline registration
+
+`WalActorContinuationGate` is a new **package-private HOST-ONLY** boundary;
+it is NOT registered as a guest API and does not produce a DB committed ACK.
+A completed `CompletionStage` may invoke `whenComplete` on the actor carrier
+that registers it. The new gate performs only a nonblocking `ArrayBlockingQueue`
+offer of a notice on that path (32 entries). A separate virtual dispatcher
+queries a supplied trusted runtime scheduler and hands the continuation to
+its actor mailbox; the continuation rechecks activation at actual execution.
+If queue admission is exhausted or scheduling fails the gate is poisoned;
+a synchronous CallerRuns-style runtime scheduler is quarantined rather than
+executing guest code on the bridge dispatcher.
+
+The current scheduler interface is a **host contract and mockable seam**,
+not proof of integration into the Graal/LLVM isolate scheduler. Real runtime
+integration must separately authenticate the caller and runtime-owned queue,
+enforce bounded mailbox admission, nonreentrancy, generation fencing and
+never expose the raw `CompletionStage` as a guest suspension handle.
+The runtime must treat `gate.isPoisoned()` as fail-closed; no durable ACK
+can follow dropped/rejected notices. An actor handler must never block
+waiting for a continuation's own shutdown or for a future from this gate.
+
+`WalActorContinuationGateTest` covers early and late completion delivery,
+exact-context identity rejection, stale actor turns, executor rejection,
+CallerRuns-style misconfiguration, and 33rd-notice overflow. For a **local
+isolated Java21 source test**, Git blob hashes for the actual new source and
+test matched the current GitHub blob hashes:
+- source `fbe8d7c35602628a8cf002f8c009139b91a5c27b`;
+- test `40052723624e137638d757047e939f65804d6bb1`.
+
+Those two exact files compiled with `javac -Xlint:all -Werror` and the test
+printed `HOST_WAL_ACTOR_CONTINUATION_GATE_PASS (not Oreslang guest)`
+**10/10 times**. Only the referenced existing `Context` and `Owner`
+types were supplied by minimal compile-time stand-ins for this isolated
+test; the full current Java primitive/grant/host CI matrix was **not**
+compiled or executed in this local test. The exact-HEAD GitHub Actions
+runner in the source organization is still blocked at admission.
+
 ## Outstanding risks
 
 - Client code that blocks *all* 32 receipt handoffs waiting for operations

@@ -118,7 +118,11 @@ final class WalFilePrimitive {
     // receipt an independent virtual-thread handoff. Every handoff retains
     // its admission slot until its synchronous callbacks return, so the
     // existing MAX_OUTSTANDING=32 bound also caps concurrent handoffs.
-    // No task runs on the disk worker or a caller/actor carrier.
+    // Owned disk/handoff tasks never run on caller/actor carriers.
+    // WARNING: a synchronous callback registered *after* the returned
+    // CompletionStage already completed can execute inline on its caller.
+    // Guest admission must schedule all continuations onto an authorized,
+    // generation-fenced runtime executor, including late subscribers.
     handoffWorker = Executors.newThreadPerTaskExecutor(
         Thread.ofVirtual().name("ores-db-wal-handoff-", 0).factory());
   }
@@ -213,20 +217,39 @@ final class WalFilePrimitive {
         // Completion may run untrusted callbacks, never on disk I/O worker.
         // A late revocation dominates even a completed sync. Only the
         // WAL owner after a fresh generation-fence check may publish a DB ACK.
-        if (error == null && revoked)
-          result.completeExceptionally(new UnknownOutcome("receipt revoked before handoff", null));
-        else if (error == null) result.complete(receipt);
-        else result.completeExceptionally(error);
-        synchronized (admissionLock) { --outstanding; }
+        try {
+          if (error == null && revoked)
+            result.completeExceptionally(new UnknownOutcome("receipt revoked before handoff", null));
+          else if (error == null) result.complete(receipt);
+          else result.completeExceptionally(error);
+        } finally {
+          // Synchronous dependents can block or throw: retain the slot until
+          // completion propagation finishes; never lose it on an exception.
+          synchronized (admissionLock) {
+            --outstanding;
+            admissionLock.notifyAll();
+          }
+        }
       });
     } catch (RejectedExecutionException handoffFailure) {
       // Completing a CompletableFuture may invoke user continuations inline.
       // A rejected handoff must NEVER run such callbacks on the disk worker.
       // Quarantine first, then publish Unknown on a separate virtual thread.
-      synchronized (admissionLock) { poisoned = true; --outstanding; }
-      Thread.ofVirtual().name("ores-db-wal-handoff-emergency").start(() ->
+      synchronized (admissionLock) { poisoned = true; }
+      // An emergency handoff is outside handoffWorker. Keep the original
+      // outstanding slot until its synchronous callbacks finish so that
+      // revokeAndCloseAsync cannot complete while delivery is still active.
+      Thread.ofVirtual().name("ores-db-wal-handoff-emergency").start(() -> {
+        try {
           result.completeExceptionally(new UnknownOutcome(
-              "receipt delivery unavailable", handoffFailure)));
+              "receipt delivery unavailable", handoffFailure));
+        } finally {
+          synchronized (admissionLock) {
+            --outstanding;
+            admissionLock.notifyAll();
+          }
+        }
+      });
     }
   }
 
@@ -249,7 +272,21 @@ final class WalFilePrimitive {
           handoffWorker.shutdown();
           if (!handoffWorker.awaitTermination(30, TimeUnit.SECONDS))
             throw new IllegalStateException("handoff not quiescent; preserve open FD");
-          // Only disk and owned handoff-executor tasks are now quiescent.
+          // Emergency fallback completions are not handoffWorker tasks.
+          // Every accepted append retains an outstanding slot until its
+          // synchronous completion callbacks (including emergency) return.
+          // Never close the FD or resolve shutdown while those are active.
+          long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+          synchronized (admissionLock) {
+            while (outstanding != 0) {
+              long remaining = deadline - System.nanoTime();
+              if (remaining <= 0)
+                throw new IllegalStateException(
+                    "emergency WAL callbacks not quiescent; preserve open FD");
+              TimeUnit.NANOSECONDS.timedWait(admissionLock, remaining);
+            }
+          }
+          // Only disk and owned handoff-executor/emergency tasks are quiescent.
           // A client may schedule its own CompletionStage continuations on
           // other executors. Those NEVER receive this FD; the actual runtime
           // must independently generation-fence any actor-state reentry.
