@@ -40,7 +40,7 @@ if ! timeout 40s "$JAVA_BIN" -cp "$tmp" \
   cat "$tmp/stderr" >&2
   exit 1
 fi
-printf '%s\n' 'HOST_JAVA_PRIMITIVE_PASS assertions=75 (not Oreslang guest; process-kill post-sync only)' >"$tmp/expected"
+printf '%s\n' 'HOST_JAVA_PRIMITIVE_PASS assertions=80 (not Oreslang guest; process-kill post-sync only)' >"$tmp/expected"
 if ! cmp -s "$tmp/stdout" "$tmp/expected"; then
   echo 'HOST_JAVA_PRIMITIVE_FAIL: exact stdout mismatch' >&2
   cat "$tmp/stdout" >&2
