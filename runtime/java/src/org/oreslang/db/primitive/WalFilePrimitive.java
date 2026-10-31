@@ -213,14 +213,19 @@ final class WalFilePrimitive {
         // Completion may run untrusted callbacks, never on disk I/O worker.
         // A late revocation dominates even a completed sync. Only the
         // WAL owner after a fresh generation-fence check may publish a DB ACK.
-        if (error == null && revoked)
-          result.completeExceptionally(new UnknownOutcome("receipt revoked before handoff", null));
-        else if (error == null) result.complete(receipt);
-        else result.completeExceptionally(error);
-        // A future's synchronous dependents may block or throw. Always
-        // return the admission slot, even if completion propagation fails.
-        // Close waits for this tracked handoff to quiesce.
-        synchronized (admissionLock) { --outstanding; admissionLock.notifyAll(); }
+        try {
+          if (error == null && revoked)
+            result.completeExceptionally(new UnknownOutcome("receipt revoked before handoff", null));
+          else if (error == null) result.complete(receipt);
+          else result.completeExceptionally(error);
+        } finally {
+          // Synchronous dependents can block or throw: retain the slot until
+          // completion propagation finishes; never lose it on an exception.
+          synchronized (admissionLock) {
+            --outstanding;
+            admissionLock.notifyAll();
+          }
+        }
       });
     } catch (RejectedExecutionException handoffFailure) {
       // Completing a CompletableFuture may invoke user continuations inline.
