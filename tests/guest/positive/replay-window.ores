@@ -32,10 +32,12 @@ pub routine main(): void {
 
   // An empty next window advances nothing, preserving the provided fence.
   let empty = wal_replay_window.inspect(7, 15, 4, new List<int>());
-  if empty.is_err() || empty.unwrap().complete_records != 0 ||
-    empty.unwrap().last_sequence != 14 ||
-    empty.unwrap().consumed_bytes != 0 ||
-    empty.unwrap().pending_tail; then
+  if empty.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val empty_scan = empty.unwrap();
+  if empty_scan.complete_records != 0 ||
+    empty_scan.last_sequence != 14 ||
+    empty_scan.consumed_bytes != 0 ||
+    empty_scan.pending_tail; then
     stdio.stdout.write("db:FAILED"); return;
   fi
 
