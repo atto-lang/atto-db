@@ -13,6 +13,27 @@ java -cp build/pg-host dev.oreslang.db.ActorPgPoolTest
 
 Admission additionally caps the aggregate estimated parameter payload at 1 MiB per submission (not 1 MiB per parameter) and rejects extreme decimal scales. This is a host-reference bound, not a complete heap-usage bound; concurrency budgets, credential isolation, transport timeouts and server-side resource limits still apply.
 
+**Local execution without GitHub Actions** (requires a running Docker
+daemon, Docker's PostgreSQL 17 image, JDK 21, Git, OpenSSL and Maven/JDBC
+dependency access):
+
+```sh
+# From the repository root after independently reviewing and checking out
+# the exact PR-head commit; do not substitute an unreviewed floating branch.
+EXPECTED_HEAD_SHA=<reviewed-40-character-commit> \
+  bash scripts/verify-disposable-postgres17.sh
+```
+
+The script refuses a mismatched commit or dirty/untracked host-reference
+tree, starts **only** a freshly created ephemeral PostgreSQL 17 Docker container
+with a random password bound to loopback, compiles tracked Java sources,
+records Git tree/source hashes, runs four host test programs and both real
+PostgreSQL integration tests, and removes the container afterward. It never
+takes an external PostgreSQL URL or production credentials as input. An
+inaccessible Docker daemon/JDBC dependency is a *not executed* result, not
+evidence of PostgreSQL correctness. This script does not execute Oreslang
+guest code.
+
 **Database-principal isolation experiment (not wired into ActorPgPool):**
 `PostgresPrincipalIsolationTest` creates two fresh, unrelated LOGIN roles on a
 disposable PostgreSQL 17 instance. It uses `current_user` in a FORCE RLS policy
