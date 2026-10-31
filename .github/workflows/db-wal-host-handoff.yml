@@ -30,7 +30,8 @@ jobs:
             runtime/java/src/org/oreslang/db/primitive/WalRuntimeGrant.java \
             runtime/java/test/org/oreslang/db/primitive/WalFilePrimitiveTest.java \
             runtime/java/test/org/oreslang/db/primitive/WalRuntimeGrantTest.java \
-            runtime/java/test/org/oreslang/db/primitive/WalHandoffLivenessTest.java
+            runtime/java/test/org/oreslang/db/primitive/WalHandoffLivenessTest.java \
+            runtime/java/test/org/oreslang/db/primitive/WalHandoffSaturationTest.java
       - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
         with:
           distribution: temurin
@@ -48,8 +49,9 @@ jobs:
             runtime/java/src/org/oreslang/db/primitive/WalRuntimeGrant.java \
             runtime/java/test/org/oreslang/db/primitive/WalFilePrimitiveTest.java \
             runtime/java/test/org/oreslang/db/primitive/WalRuntimeGrantTest.java \
-            runtime/java/test/org/oreslang/db/primitive/WalHandoffLivenessTest.java
-      - name: Execute all three independent Java host regressions
+            runtime/java/test/org/oreslang/db/primitive/WalHandoffLivenessTest.java \
+            runtime/java/test/org/oreslang/db/primitive/WalHandoffSaturationTest.java
+      - name: Execute all four independent Java host regressions
         shell: bash
         run: |
           set -euo pipefail
@@ -63,5 +65,8 @@ jobs:
           cat "$out"
           timeout 35s java -cp "$cp" org.oreslang.db.primitive.WalHandoffLivenessTest >"$out"
           test "$(cat "$out")" = "HOST_WAL_HANDOFF_LIVENESS_PASS (not Oreslang guest)"
+          cat "$out"
+          timeout 35s java -cp "$cp" org.oreslang.db.primitive.WalHandoffSaturationTest >"$out"
+          test "$(cat "$out")" = "HOST_WAL_HANDOFF_BOUND_PASS slots=32 (not Oreslang guest)"
           cat "$out"
           echo 'HOST_ONLY_PASS no Oreslang guest, native storage authority, replay, or durability proof'
