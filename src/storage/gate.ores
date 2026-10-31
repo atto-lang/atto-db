@@ -3,6 +3,7 @@
 // receipt authenticator, or durable transaction. The owning actor must keep
 // the instance sealed in one state schema. Never DATA-transfer this instance.
 import module storage_policy from "./capability";
+import module wal_frame from "../wal/frame";
 define module storage_gate as
   pub define class AdmissionGate as
     let int generation;
@@ -59,6 +60,23 @@ define module storage_gate as
         fi
       }
       return Err("queue_full");
+    }
+
+    // Pure guest-facing ODB1 validation before local slot reservation.
+    // A successful slot is ACCOUNTING ONLY, never a storage capability,
+    // file descriptor, durable receipt, or permission to ACK.
+    pub admit_frame(mut self)(int tenant, int message_generation,
+                              int operation_id, List<int> wire): Result<int, String> {
+      val decoded = wal_frame.decode(wire);
+      if decoded.is_err(); then
+        return Err("invalid_wal_frame");
+      fi
+      val frame = decoded.unwrap();
+      if frame.tenant != tenant || frame.generation != message_generation ||
+        frame.operation_id != operation_id; then
+        return Err("wire_identity_mismatch");
+      fi
+      return self.admit(tenant, message_generation, operation_id, wire.length);
     }
 
     // Only one physical storage dispatch at a time per shard. This does
