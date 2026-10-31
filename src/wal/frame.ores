@@ -108,7 +108,9 @@ define module wal_frame as
     append_u16(output, value.length);
     for (const b of key) { output.add(b); }
     for (const b of value) { output.add(b); }
-    append_checksum(output, output.length);
+    // End the immutable header/payload read before handing out a mut loan.
+    let int payload_length = output.length;
+    append_checksum(output, payload_length);
     return Ok(output);
   }
 
