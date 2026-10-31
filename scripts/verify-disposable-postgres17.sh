@@ -33,17 +33,18 @@ cleanup() {
 trap cleanup EXIT
 docker info >/dev/null || { echo "Docker daemon unavailable" >&2; exit 69; }
 container="ores-pg17-$(openssl rand -hex 8)"
+test_password="$(openssl rand -hex 16)"
 docker run -d --rm --name "$container" \
-  -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=disposable-test-only \
+  -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD="$test_password" \
   -e POSTGRES_DB=postgres -p 127.0.0.1::5432 postgres:17 >/dev/null
 port_mapping="$(docker port "$container" 5432/tcp)"
 port="${port_mapping##*:}"
 [[ "$port" =~ ^[0-9]{2,5}$ ]] || { echo "invalid loopback Docker port" >&2; exit 69; }
 for _ in {1..60}; do
-  if docker exec "$container" pg_isready -U postgres -d postgres >/dev/null 2>&1; then break; fi
+  if docker exec "$container" pg_isready -h 127.0.0.1 -U postgres -d postgres >/dev/null 2>&1; then break; fi
   sleep 1
 done
-docker exec "$container" pg_isready -U postgres -d postgres >/dev/null
+docker exec "$container" pg_isready -h 127.0.0.1 -U postgres -d postgres >/dev/null
 echo "postgres_container_image=$(docker image inspect postgres:17 --format '{{.Id}}')"
 echo "java_compiler=$(javac -version 2>&1)"
 for source in "${sources[@]}"; do
@@ -64,7 +65,7 @@ for jar in "$workdir"/jdbc/*.jar; do
 done
 export ORES_TEST_PG_URL="jdbc:postgresql://127.0.0.1:$port/postgres?connectTimeout=10&socketTimeout=40"
 export ORES_TEST_PG_ADMIN_USER=postgres
-export ORES_TEST_PG_ADMIN_PASSWORD=disposable-test-only
+export ORES_TEST_PG_ADMIN_PASSWORD="$test_password"
 java -cp "$workdir/classes:$workdir/jdbc/*" dev.oreslang.db.PostgresIntegrationTest
 java -cp "$workdir/classes:$workdir/jdbc/*" dev.oreslang.db.PostgresPrincipalIsolationTest
 echo "DISPOSABLE_PG17_HOST_AND_RLS_EXECUTION_PASS source_commit=$head"
