@@ -12,10 +12,12 @@ pub routine main(): void {
   if first.is_err() || gap.is_err() || foreign.is_err(); then
     stdio.stdout.write("db:FAILED"); return;
   fi
+  val first_bytes = first.unwrap();
+  val gap_bytes = gap.unwrap();
   let List<int> corrupted = new List<int>();
-  for (const b of first.unwrap()) { corrupted.add(b); }
+  for (const b of first_bytes) { corrupted.add(b); }
   corrupted.set(26, 0);
-  if index.apply_candidate(gap.unwrap()).is_ok() ||
+  if index.apply_candidate(gap_bytes).is_ok() ||
     index.apply_candidate(foreign.unwrap()).is_ok() ||
     index.apply_candidate(corrupted).is_ok() ||
     index.last_record_sequence() != 0 ||
@@ -24,7 +26,7 @@ pub routine main(): void {
     index.candidate_get(key).is_ok(); then
     stdio.stdout.write("db:FAILED"); return;
   fi
-  if index.apply_candidate(first.unwrap()).is_err(); then
+  if index.apply_candidate(first_bytes).is_err(); then
     stdio.stdout.write("db:FAILED"); return;
   fi
   let duplicate = wal_frame.encode(7, 3, 2, 100, 2, key, new List<int>());
@@ -42,7 +44,7 @@ pub routine main(): void {
     index.can_acknowledge(); then
     stdio.stdout.write("db:FAILED"); return;
   fi
-  if index.apply_candidate(gap.unwrap()).is_err() ||
+  if index.apply_candidate(gap_bytes).is_err() ||
     index.last_record_sequence() != 2; then
     stdio.stdout.write("db:FAILED"); return;
   fi
