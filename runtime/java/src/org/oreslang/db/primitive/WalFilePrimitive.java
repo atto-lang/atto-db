@@ -218,8 +218,13 @@ final class WalFilePrimitive {
         synchronized (admissionLock) { --outstanding; }
       });
     } catch (RejectedExecutionException handoffFailure) {
+      // Completing a CompletableFuture may invoke user continuations inline.
+      // A rejected handoff must NEVER run such callbacks on the disk worker.
+      // Quarantine first, then publish Unknown on a separate virtual thread.
       synchronized (admissionLock) { poisoned = true; --outstanding; }
-      result.completeExceptionally(new UnknownOutcome("receipt delivery unavailable", handoffFailure));
+      Thread.ofVirtual().name("ores-db-wal-handoff-emergency").start(() ->
+          result.completeExceptionally(new UnknownOutcome(
+              "receipt delivery unavailable", handoffFailure)));
     }
   }
 
@@ -239,10 +244,13 @@ final class WalFilePrimitive {
         try {
           if (!diskWorker.awaitTermination(30, TimeUnit.SECONDS))
             throw new IllegalStateException("disk I/O not quiescent; preserve open FD");
-          channel.close();
           handoffWorker.shutdown();
           if (!handoffWorker.awaitTermination(30, TimeUnit.SECONDS))
-            throw new IllegalStateException("handoff not quiescent");
+            throw new IllegalStateException("handoff not quiescent; preserve open FD");
+          // The file descriptor belongs to the owner until ALL I/O and
+          // completion callbacks have quiesced. An exception above preserves
+          // the FD rather than allowing a stale callback to outlive closure.
+          channel.close();
           completion.complete(null);
         } catch (Exception failure) {
           completion.completeExceptionally(failure);
