@@ -1,0 +1,51 @@
+name: DB read-only WAL replay host checks (not Oreslang guest)
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/db-wal-readonly-replay.yml'
+      - 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java'
+      - 'runtime/java/test/org/oreslang/db/primitive/ReadOnlyWalReplayTest.java'
+      - 'docs/READ_ONLY_REPLAY_STAGE7.md'
+permissions:
+  contents: read
+jobs:
+  java21-readonly:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Verify exact head and tracked tree
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "SOURCE_COMMIT=$(git rev-parse HEAD)"
+          echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
+          sha256sum runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java \
+            runtime/java/test/org/oreslang/db/primitive/ReadOnlyWalReplayTest.java
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Compile host-only inspection and run real-file test
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -version
+          javac -version
+          sha256sum "$(readlink -f "$(command -v java)")" "$(readlink -f "$(command -v javac)")"
+          mkdir -p "$RUNNER_TEMP/ores-db-replay"
+          javac -Xlint:all -Werror -d "$RUNNER_TEMP/ores-db-replay" \
+            runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java \
+            runtime/java/test/org/oreslang/db/primitive/ReadOnlyWalReplayTest.java
+          timeout 45s java -cp "$RUNNER_TEMP/ores-db-replay" \
+            org.oreslang.db.primitive.ReadOnlyWalReplayTest > "$RUNNER_TEMP/replay.txt"
+          test "$(cat "$RUNNER_TEMP/replay.txt")" = \
+            'HOST_WAL_READONLY_REPLAY_PASS checks=60 (read-only diagnostic; not guest, lease, truncation, commit or crash proof)'
+          cat "$RUNNER_TEMP/replay.txt"
