@@ -29,6 +29,17 @@ Do not allow a guest-created object, public constructor, magic int, or checksum 
 
 The intended owner flow is: authenticate external context; reserve slot under `handle_state(critical-write)`; release state loan; submit asynchronous `append`; await its completion; await `sync_data`; verify provider receipt; briefly re-acquire state loan with matching generation/op ID; publish/release resources; then ACK. No await or filesystem call inside a critical section. The current provisional actor only closes on DATA input and exercises none of that flow.
 
+## Exact-head guest verification
+
+`ci/verify-native-storage-stage1.sh` reuses the fail-closed
+`ci/verify-native-wal.sh` compiler SHA-256, clean-tree and independently
+pinned exact commit/tree gate. Then it requires `--check` of the provisional
+sealed-state actor (which may **fail** until compiler support lands), and
+`--check` plus actual execution of the pure admission fixture, with exactly
+`db:storage-admission-ok` stdout. This command has not executed against a
+real verified Oreslang compiler. An actor parser error is a blocker, never
+a green skip. This gate does NOT validate a storage capability or durable sync.
+
 ## Acceptance evidence still required
 
 - Obtain a compiler binary independently tied to a pinned source SHA and SHA-256. On an exact source head+tree: `--check` the actor and policy/gate, run WAL golden/negative/boundary and storage admission guest fixtures, inspect stdout/exit codes and nonzero runner steps.
