@@ -26,11 +26,14 @@ pub routine main(): void {
     stdio.stdout.write("db:FAILED"); return;
   fi
   let got_first = index.candidate_get(key);
-  if got_first.is_err() || got_first.unwrap().get(0) != 97; then
+  if got_first.is_err(); then
     stdio.stdout.write("db:FAILED"); return;
   fi
-  // A caller must not be able to mutate the stored candidate via read alias.
+  // Unwrap exactly once, then mutate the returned copy, not index state.
   let mut escaped = got_first.unwrap();
+  if escaped.get(0) != 97; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
   escaped.set(0, 99);
   let got_again = index.candidate_get(key);
   if got_again.is_err() || got_again.unwrap().get(0) != 97; then
