@@ -57,6 +57,7 @@ pub routine main(): void {
     index.last_record_sequence() != 5 ||
     index.last_owner_generation() != 4 ||
     index.accepted_records() != 5 ||
+    index.inspected_wal_bytes() != 158 ||
     index.key_slot_count() != 1 ||
     index.retained_value_bytes() != 1 ||
     index.can_acknowledge(); then
