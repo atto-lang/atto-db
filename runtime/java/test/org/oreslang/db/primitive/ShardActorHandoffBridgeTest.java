@@ -112,6 +112,12 @@ public final class ShardActorHandoffBridgeTest {
       AtomicBoolean current = new AtomicBoolean(true);
       AtomicBoolean reject = new AtomicBoolean(false);
       var bridge = bridge(context, grant, actor, current, reject);
+      check(grant.isBoundTo(context) && !grant.isBoundTo(equalIdsDifferentContext),
+            "WAL writer is bound to exact runtime context identity");
+      boolean foreignFactoryDenied = false;
+      try { bridge(equalIdsDifferentContext, grant, actor, current, reject); }
+      catch (SecurityException expected) { foreignFactoryDenied = true; }
+      check(foreignFactoryDenied, "foreign-context shard bridge construction denied");
       byte[] key = {107};
       byte[] one = frame(3, 1, 101, 1, key, new byte[] {118});
       byte[] two = frame(3, 2, 102, 1, key, new byte[] {119});
@@ -168,6 +174,7 @@ public final class ShardActorHandoffBridgeTest {
       check(!bridge.canAcknowledgeGuest(), "host publication cannot ACK guest");
       bridge.retireFromTrustedRuntime().toCompletableFuture()
           .get(12, TimeUnit.SECONDS);
+      check(!grant.isBoundTo(context), "revoked WAL grant cannot be readmitted");
       check(bridge.isQuarantinedForDiagnostics(), "retirement quarantines bridge");
       denied(actor, () -> bridge.readOnActorTurn(context, key),
           RejectedExecutionException.class, "retired shard never serves reads");
