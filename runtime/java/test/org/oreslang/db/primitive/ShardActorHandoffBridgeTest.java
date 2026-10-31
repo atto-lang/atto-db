@@ -189,12 +189,14 @@ public final class ShardActorHandoffBridgeTest {
       AtomicBoolean reject = new AtomicBoolean(false);
       var bridge = bridge(ctx, grant, actor, current, reject);
       byte[] key = {107};
+      // Refuse mailbox dispatch before submitting when testing rejection:
+      // the disk may finish and deliver a callback extremely quickly.
+      if (!staleGeneration) reject.set(true);
       actor(actor, () -> {
         bridge.appendOnActorTurn(ctx, frame(3, 1, 111, 1, key, new byte[] {118}));
-        // Actor activation is retired or mailbox rejects BEFORE leaving this
-        // serialized turn, so a later receipt cannot re-enter a healthy turn.
+        // A stale activation is fenced before leaving this serialized turn.
+        // A pending callback cannot re-enter the now-retired actor generation.
         if (staleGeneration) current.set(false);
-        else reject.set(true);
         return null;
       });
       awaitQuarantine(bridge);
