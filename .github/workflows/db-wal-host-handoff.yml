@@ -1,0 +1,67 @@
+name: DB WAL host handoff (not native Oreslang guest)
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/db-wal-host-handoff.yml'
+      - 'runtime/java/src/org/oreslang/db/primitive/**'
+      - 'runtime/java/test/org/oreslang/db/primitive/**'
+permissions:
+  contents: read
+jobs:
+  java21-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Prove exact PR head, tree, clean tracked source
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "SOURCE_COMMIT=$(git rev-parse HEAD)"
+          echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
+          sha256sum runtime/java/src/org/oreslang/db/primitive/WalFilePrimitive.java \
+            runtime/java/src/org/oreslang/db/primitive/WalRuntimeGrant.java \
+            runtime/java/test/org/oreslang/db/primitive/WalFilePrimitiveTest.java \
+            runtime/java/test/org/oreslang/db/primitive/WalRuntimeGrantTest.java \
+            runtime/java/test/org/oreslang/db/primitive/WalHandoffLivenessTest.java
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Compile exact Java21 WAL host sources with warnings as errors
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -version
+          javac -version
+          sha256sum "$(readlink -f "$(command -v java)")" "$(readlink -f "$(command -v javac)")"
+          mkdir -p "$RUNNER_TEMP/ores-db-host"
+          javac -Xlint:all -Werror -d "$RUNNER_TEMP/ores-db-host" \
+            runtime/java/src/org/oreslang/db/primitive/WalFilePrimitive.java \
+            runtime/java/src/org/oreslang/db/primitive/WalRuntimeGrant.java \
+            runtime/java/test/org/oreslang/db/primitive/WalFilePrimitiveTest.java \
+            runtime/java/test/org/oreslang/db/primitive/WalRuntimeGrantTest.java \
+            runtime/java/test/org/oreslang/db/primitive/WalHandoffLivenessTest.java
+      - name: Execute all three independent Java host regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp="$RUNNER_TEMP/ores-db-host"
+          out="$RUNNER_TEMP/ores-db-host-out"
+          timeout 45s java -cp "$cp" org.oreslang.db.primitive.WalFilePrimitiveTest >"$out"
+          test "$(cat "$out")" = "HOST_JAVA_PRIMITIVE_PASS assertions=80 (not Oreslang guest; process-kill post-sync only)"
+          cat "$out"
+          timeout 35s java -cp "$cp" org.oreslang.db.primitive.WalRuntimeGrantTest >"$out"
+          test "$(cat "$out")" = "HOST_WAL_RUNTIME_GRANT_PASS checks=16 (not Oreslang guest)"
+          cat "$out"
+          timeout 35s java -cp "$cp" org.oreslang.db.primitive.WalHandoffLivenessTest >"$out"
+          test "$(cat "$out")" = "HOST_WAL_HANDOFF_LIVENESS_PASS (not Oreslang guest)"
+          cat "$out"
+          echo 'HOST_ONLY_PASS no Oreslang guest, native storage authority, replay, or durability proof'
