@@ -51,3 +51,36 @@ a green skip. This gate does NOT validate a storage capability or durable sync.
 ## Merge/release policy
 
 Do **not** merge this source slice or its prerequisites until compiler compatibility, typed runtime storage authority, and independently approved CI security gates pass. Source-org Actions previously had admission failures; a cross-org private mirror needs separate authorization and exact Git tree/blob SHA verification. No source transfer is made in this PR.
+
+
+## Stage 1.6 — complete-wire admission, still no durable write
+
+`AdmissionGate.admit_frame` in `src/storage/gate.ores` imports the
+pure ODB1 codec, rejects malformed/checksum-corrupted frames,
+checks tenant/generation/op ID against the submitted request, then
+reserves the actual verified wire length through the existing 32-slot
+admission gate. It does not validate a trusted actor principal or grant
+filesystem authority. The legacy `admit` remains **pure numeric
+bookkeeping** and MUST NOT be a privileged I/O entry point.
+
+New `tests/guest/positive/wal-frame-admission-only.ores` checks
+cross-owner refusal, corrupt payload refusal without slot consumption,
+valid admission, duplicate rejection and dispatched-unknown fencing.
+`ci/verify-native-storage-stage1.sh` now requires an independent
+pinned compiler, `--check` and actual guest execution of this fixture,
+with exact stdout `db:wal-prepared-only-ok`. The fixture was authored
+but **NOT executed**, because no authenticated Oreslang compiler binary
+was available in the local environment or on an admitted private
+Actions runner. This cannot be counted as native guest evidence.
+
+Host-side parity work: Java draft #2362 now validates the full frame
+against the context-issued shard grant before async admission; LLVM
+draft #1232 has a strict validated append+fdatasync path and process
+reopen host test. The respective source-exact Java host smoke and
+ASan/UBSan C++ tracked test cases passed locally, without proving any
+guest `Committed` path. `DbStorageActor` remains reject-all.
+
+No native runtime-issued handle is accessible from .ores. There is
+no verified sync receipt, durable ACK, replay/checkpoint logic or
+parent-directory sync. Keep this PR and its backend dependencies DRAFT
+until the compiler and end-to-end crash gates execute.
