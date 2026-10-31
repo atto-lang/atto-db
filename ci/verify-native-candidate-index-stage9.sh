@@ -39,4 +39,5 @@ verify_case() {
 }
 verify_case tests/guest/positive/candidate-index-lifecycle.ores db:candidate-index-lifecycle-ok
 verify_case tests/guest/negative/candidate-index-rejections.ores db:candidate-index-rejections-ok
+verify_case tests/guest/negative/candidate-index-wal-budget.ores db:candidate-index-wal-budget-ok
 echo 'CANDIDATE_ONLY; NO ACTOR STORAGE AUTHORITY, COMMIT ACK, FSYNC OR RECOVERY PROOF'
