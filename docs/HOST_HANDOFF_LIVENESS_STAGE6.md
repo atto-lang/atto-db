@@ -59,6 +59,39 @@ passed 12/12 local executions against that byte-exact production source; its
 uploaded Git blob was separately matched to the locally executed fixture.
 GitHub runner evidence and all inherited host suites remain separate gates.
 
+
+### Rejected handoff / emergency completion close race (new hardening)
+
+When the normal handoff executor rejects a WAL receipt, its error completion
+runs on a dedicated virtual thread. Previously the original outstanding slot
+was released **before** that emergency callback ran, and the async close path
+awaited only the normal handoff executor. Thus shutdown could resolve and
+close the descriptor while the emergency future was still running user
+callbacks. Receipt delivery no longer had the intended quiescence accounting.
+
+The repaired primitive retains its outstanding slot through emergency
+`completeExceptionally` and all synchronously invoked dependents; both
+normal and emergency paths release slots in `finally` and notify the admission
+monitor. After the disk and normal handoff executors have terminated, close
+now waits for any remaining emergency-owned slots to quiesce (bounded 30s).
+A timeout fails closed and **preserves the open file descriptor**, so its
+owner must not publish a successful close or a durable ACK.
+
+`WalEmergencyQuiescenceTest` uses a real `FileChannel.force(true)` before
+shutting down only the normal handoff executor. Its emergency callback is held
+at a deterministic latch while `revokeAndCloseAsync` runs. The test rejects
+shutdown completion/FD closure before callback release, then requires prompt
+closure after the callback finishes and checks preserved WAL bytes. The
+standalone Java 21 script and GitHub workflow now include this fifth host suite
+with a fixed exact-output oracle.
+
+**Evidence distinction:** this new emergency-close test and revised primitive
+are committed but have **not** yet been verified by a Java 21 source execution
+receipt for this new PR head. Earlier four host-suite passes refer to the
+previous source head. The source org's zero-step Actions admission failures
+are not test evidence. Private alternate-runner execution requires independent
+approval for its *new* source tree and access scope before any source transfer.
+
 ## Outstanding risks
 
 - Client code that blocks *all* 32 receipt handoffs waiting for operations
