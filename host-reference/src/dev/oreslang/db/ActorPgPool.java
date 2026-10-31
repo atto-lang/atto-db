@@ -22,6 +22,19 @@ public final class ActorPgPool implements AutoCloseable {
     }
     public record Outcome(int updateCount, List<List<Object>> rows) { }
 
+    /**
+     * Trusted-host-only database login binding. This object and its DataSource
+     * must never be handed to an Oreslang actor or serialized as DATA.
+     */
+    public record PrincipalBinding(String databaseRole, DataSource source) {
+        public PrincipalBinding {
+            Objects.requireNonNull(databaseRole);
+            Objects.requireNonNull(source);
+            if (!databaseRole.matches("[A-Za-z_][A-Za-z0-9_]{0,62}"))
+                throw new IllegalArgumentException("invalid PostgreSQL principal identifier");
+        }
+    }
+
     /** Trusted-host-issued opaque capability, never a DATA message. */
     public static final class Capability {
         private final ActorPgPool owner;
@@ -59,6 +72,7 @@ public final class ActorPgPool implements AutoCloseable {
     private record Completion(Job job, Outcome outcome, Exception error) { }
 
     private final DataSource source;
+    private final Map<String, PrincipalBinding> principals;
     private final Map<String, Template> templates;
     private final int maxTotal, maxTenant, maxRows, maxResultBytes;
     private final Object gate = new Object();
@@ -71,9 +85,49 @@ public final class ActorPgPool implements AutoCloseable {
     private int outstanding;
     private boolean closed;
 
+    /** Legacy single-role host reference; a tenant GUC is not an authorization principal. */
     public ActorPgPool(DataSource source, Collection<Template> registered, int connections,
                        int maxTotal, int maxTenant, int maxRows, int maxResultBytes) {
-        this.source = Objects.requireNonNull(source);
+        this(Objects.requireNonNull(source), Map.of(), registered,
+             connections, maxTotal, maxTenant, maxRows, maxResultBytes);
+    }
+
+    /**
+     * Credential-fenced host reference: each tenant is bound to a distinct,
+     * non-superuser PostgreSQL login role through a trusted-host DataSource.
+     * Workers retire a connection before switching tenants, and independently
+     * verify session_user/current_user against the expected principal.
+     */
+    public ActorPgPool(Map<String, PrincipalBinding> principals, Collection<Template> registered,
+                       int connections, int maxTotal, int maxTenant,
+                       int maxRows, int maxResultBytes) {
+        this(null, validatePrincipals(principals), registered,
+             connections, maxTotal, maxTenant, maxRows, maxResultBytes);
+    }
+
+    private static Map<String, PrincipalBinding> validatePrincipals(Map<String, PrincipalBinding> configured) {
+        Objects.requireNonNull(configured);
+        if (configured.isEmpty()) throw new IllegalArgumentException("no tenant principals");
+        Map<String, PrincipalBinding> verified = new HashMap<>();
+        Set<String> roles = new HashSet<>();
+        for (var entry : configured.entrySet()) {
+            String tenant = entry.getKey();
+            PrincipalBinding binding = Objects.requireNonNull(entry.getValue());
+            if (tenant == null || tenant.isBlank() || tenant.length() > 256 ||
+                tenant.codePoints().anyMatch(Character::isISOControl))
+                throw new IllegalArgumentException("invalid principal tenant");
+            if (!roles.add(binding.databaseRole()))
+                throw new IllegalArgumentException("database principal shared across tenants");
+            verified.put(tenant, binding);
+        }
+        return Map.copyOf(verified);
+    }
+
+    private ActorPgPool(DataSource source, Map<String, PrincipalBinding> principals,
+                        Collection<Template> registered, int connections,
+                        int maxTotal, int maxTenant, int maxRows, int maxResultBytes) {
+        this.source = source;
+        this.principals = principals;
         if (connections < 1 || connections > 128 || maxTotal < 1 || maxTenant < 1 ||
             maxTenant > maxTotal || maxRows < 1 || maxResultBytes < 1)
             throw new IllegalArgumentException("invalid pool limits");
@@ -105,6 +159,8 @@ public final class ActorPgPool implements AutoCloseable {
         if (tenant == null || tenant.isBlank() || tenant.length() > 256 ||
             tenant.codePoints().anyMatch(Character::isISOControl))
             throw new IllegalArgumentException("invalid tenant");
+        if (!principals.isEmpty() && !principals.containsKey(tenant))
+            throw new SecurityException("tenant has no authorized database principal");
         Set<String> ids = Set.copyOf(allowedIds);
         if (ids.isEmpty() || !templates.keySet().containsAll(ids))
             throw new IllegalArgumentException("unregistered permission");
@@ -203,8 +259,21 @@ public final class ActorPgPool implements AutoCloseable {
             }
         }
     }
+    private static void verifyDatabasePrincipal(Connection connection, String expectedRole)
+            throws SQLException {
+        // These are SQL server values, NOT JDBC metadata or caller-supplied GUCs.
+        try (PreparedStatement statement =
+                connection.prepareStatement("SELECT session_user, current_user");
+             ResultSet rows = statement.executeQuery()) {
+            if (!rows.next() || !expectedRole.equals(rows.getString(1)) ||
+                !expectedRole.equals(rows.getString(2)) || rows.next())
+                throw new SQLException("authenticated PostgreSQL principal mismatch");
+        }
+    }
+
     private void work() {
         Connection connection = null;
+        String connectionTenant = null;
         try {
             while (true) {
                 Job job = next();
@@ -213,13 +282,35 @@ public final class ActorPgPool implements AutoCloseable {
                 Exception error = null;
                 try {
                     if (!job.completion.isCancelled()) {
-                        if (connection == null) connection = source.getConnection();
-                        result = JdbcOperation.execute(connection, job.template, job.capability.tenant, job.arguments, maxRows, maxResultBytes);
+                        if (!principals.isEmpty()) {
+                            String tenant = job.capability.tenant;
+                            if (connection != null && !tenant.equals(connectionTenant)) {
+                                // Closing before switching forbids reuse of a session
+                                // authenticated as another tenant.
+                                closeQuietly(connection);
+                                connection = null;
+                                connectionTenant = null;
+                            }
+                            PrincipalBinding binding = principals.get(tenant);
+                            if (binding == null) throw new SecurityException("unbound database tenant");
+                            if (connection == null) {
+                                connection = binding.source().getConnection();
+                                connectionTenant = tenant;
+                            }
+                            // Every reuse is checked in case an allowlisted host
+                            // template or DataSource poisoned the role.
+                            verifyDatabasePrincipal(connection, binding.databaseRole());
+                        } else if (connection == null) {
+                            connection = source.getConnection();
+                        }
+                        result = JdbcOperation.execute(connection, job.template,
+                                job.capability.tenant, job.arguments, maxRows, maxResultBytes);
                     }
                 } catch (Exception failure) {
                     error = failure;
                     closeQuietly(connection);
                     connection = null;
+                    connectionTenant = null;
                 }
                 // No actor callback on a JDBC connection owner; bounded handoff.
                 completions.put(new Completion(job, result, error));
