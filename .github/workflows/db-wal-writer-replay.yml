@@ -7,6 +7,7 @@ on:
       - 'runtime/java/src/org/oreslang/db/primitive/WalFilePrimitive.java'
       - 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java'
       - 'runtime/java/test/org/oreslang/db/primitive/WalPrimitiveReplayIntegrationTest.java'
+      - 'runtime/java/test/org/oreslang/db/primitive/WalPrimitiveProcessKillReplayTest.java'
 permissions:
   contents: read
 jobs:
@@ -43,10 +44,17 @@ jobs:
           javac -Xlint:all -Werror -d "$RUNNER_TEMP/db-writer-replay" \
             runtime/java/src/org/oreslang/db/primitive/WalFilePrimitive.java \
             runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java \
-            runtime/java/test/org/oreslang/db/primitive/WalPrimitiveReplayIntegrationTest.java
+            runtime/java/test/org/oreslang/db/primitive/WalPrimitiveReplayIntegrationTest.java \
+            runtime/java/test/org/oreslang/db/primitive/WalPrimitiveProcessKillReplayTest.java
           timeout 50s java -cp "$RUNNER_TEMP/db-writer-replay" \
             org.oreslang.db.primitive.WalPrimitiveReplayIntegrationTest \
             > "$RUNNER_TEMP/writer-replay.txt"
           printf '%s\n' 'HOST_WAL_PRIMITIVE_REPLAY_PASS checks=16 (actual host WAL writer and read-only inspector; NOT Oreslang guest or DB ACK)' > "$RUNNER_TEMP/expected.txt"
           cmp "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/writer-replay.txt"
           cat "$RUNNER_TEMP/writer-replay.txt"
+          timeout 55s java -cp "$RUNNER_TEMP/db-writer-replay" \
+            org.oreslang.db.primitive.WalPrimitiveProcessKillReplayTest \
+            > "$RUNNER_TEMP/writer-kill-replay.txt"
+          printf '%s\n' 'HOST_WAL_PRIMITIVE_PROCESS_KILL_PASS checks=14 (real host WAL force/replay; NOT guest ACK, lease or power loss)' > "$RUNNER_TEMP/expected-kill.txt"
+          cmp "$RUNNER_TEMP/expected-kill.txt" "$RUNNER_TEMP/writer-kill-replay.txt"
+          cat "$RUNNER_TEMP/writer-kill-replay.txt"
