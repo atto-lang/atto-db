@@ -34,16 +34,34 @@ inaccessible Docker daemon/JDBC dependency is a *not executed* result, not
 evidence of PostgreSQL correctness. This script does not execute Oreslang
 guest code.
 
-**Database-principal isolation experiment (not wired into ActorPgPool):**
-`PostgresPrincipalIsolationTest` creates two fresh, unrelated LOGIN roles on a
-disposable PostgreSQL 17 instance. It uses `current_user` in a FORCE RLS policy
-to test that cross-tenant reads and updates return zero rows; the roles cannot
-`SET ROLE` to one another or modify row ownership, and changing
-`ores.tenant_id` must not alter access. Run it separately from
-`PostgresIntegrationTest` because the latter still uses **one shared DB role
-and a spoofable tenant GUC**. These two tests have different security claims.
-The separate-role test exercises database SQL/roles; it does **not** establish
-per-tenant pool ownership or prove guest integration.
+**Distinct-role pool path (host reference only):**
+`ActorPgPool(Map<String, PrincipalBinding>, ...)` is an opt-in credential-fenced
+constructor. A trusted host must bind each tenant to a different non-superuser
+PostgreSQL login role and a role-specific DataSource. Unbound tenants and
+duplicate expected roles are rejected. A JDBC owner **closes its checked-out
+connection before switching tenants**, opens the new role's DataSource, and
+checks server-provided `session_user` and `current_user` before **every**
+database operation, including same-tenant reuse. A mismatch or DB error retires
+that connection; no guest may provide credentials or create PrincipalBinding.
+
+`ActorPgPrincipalPoolTest` is a synthetic host-provider test of same-tenant
+reuse, close-before-switch, unbound/duplicate role rejection and poisoned-role
+retirement. `PostgresPrincipalIsolationTest` creates two unrelated disposable
+LOGIN roles, FORCE RLS on `current_user`, denies cross-tenant SELECT/UPDATE,
+`SET ROLE` and ownership mutation, then exercises **1,000 logical pool
+requests with at most eight simultaneously checked-out JDBC connections** and
+two credential-bound DataSources. Both remain **unexecuted live PostgreSQL
+fixtures** until an approved DB runner executes them.
+
+This is distinct from `PostgresIntegrationTest`, which still exercises the
+**legacy single-role pool** and a spoofable tenant GUC. Both APIs remain for
+reference parity; callers must **never** treat the legacy single-role API as
+independent cross-tenant database isolation. Credential separation additionally
+requires DB-role membership restrictions (no cross-tenant `SET ROLE`), no
+SUPERUSER or BYPASSRLS, no guest SQL registration, reliable credential
+lifecycle/rotation, no untrusted DataSource configuration, and server-side
+resource budgets. The host-only pool is still **blocking JDBC**, not an async
+Oreslang-native driver, and cannot substitute for executed PostgreSQL/RLS proof.
 
 CI pins the pull request's **head SHA**, verifies the clean checked-out Git
 tree, prints Java source digests and runs both PostgreSQL tests in separate
