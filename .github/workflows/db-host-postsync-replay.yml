@@ -1,0 +1,50 @@
+name: OresDB host SIGKILL replay (NOT Oreslang guest)
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/db-host-postsync-replay.yml'
+      - 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java'
+      - 'runtime/java/test/org/oreslang/db/primitive/WalPostSyncCrashReplayTest.java'
+      - 'ci/verify-host-postsync-crash-replay.sh'
+permissions:
+  contents: read
+jobs:
+  post-sync-process-kill:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Exact pull-request HEAD and source blob
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          test "$(git hash-object runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java)" = 'a0db92f5c916590d79c9e0e7d087d29e9e081f5a'
+          test "$(git hash-object runtime/java/test/org/oreslang/db/primitive/WalPostSyncCrashReplayTest.java)" = '193e949ad54be5911c324f1c79a0d1252b309984'
+          echo "SOURCE_COMMIT=$(git rev-parse HEAD)"
+          echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Real host process kill after sync and read-only candidate replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh -n ci/verify-host-postsync-crash-replay.sh
+          sha256sum "$(readlink -f "$(command -v java)")" "$(readlink -f "$(command -v javac)")"
+          mkdir -p "$RUNNER_TEMP/oresdb-postsync"
+          javac -Xlint:all -Werror -d "$RUNNER_TEMP/oresdb-postsync" \
+            runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java \
+            runtime/java/test/org/oreslang/db/primitive/WalPostSyncCrashReplayTest.java
+          timeout 55s java -cp "$RUNNER_TEMP/oresdb-postsync" \
+            org.oreslang.db.primitive.WalPostSyncCrashReplayTest > "$RUNNER_TEMP/post-sync-oracle"
+          printf '%s\n' 'HOST_WAL_POSTSYNC_CRASH_REPLAY_PASS checks=18 (JVM SIGKILL and read-only candidate replay; NOT guest, DB commit, or power loss)' > "$RUNNER_TEMP/expected"
+          cmp "$RUNNER_TEMP/expected" "$RUNNER_TEMP/post-sync-oracle"
+          cat "$RUNNER_TEMP/post-sync-oracle"
