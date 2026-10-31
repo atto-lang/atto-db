@@ -42,10 +42,10 @@ future bridging must never export this class or its constructor to guest code.
 - Native Java tests validate independent exact 32-byte v1 golden vector,
   rejected frame/owner/sequence, duplicate IDs, defensive copy, bounded
   admission, forced sync failure, fail-closed queued-work poisoning,
-  callback handoff outside disk worker, revocation, real file reopen, and a
-  **separate JVM forcibly terminated after `FileChannel.force(true)`**.
+  callback handoff outside disk worker, revocation, real file reopen, handoff-queue rejection without running guest callbacks on the disk worker,
+  and a **separate JVM forcibly terminated after `FileChannel.force(true)`**.
   Local test: `javac -Xlint:all -Werror` and `java` complete with
-  `HOST_JAVA_PRIMITIVE_PASS assertions=75`. A clean exact-head CI run must
+  `HOST_JAVA_PRIMITIVE_PASS assertions=80`. A clean exact-head CI run must
   instead use `ci/verify-java-storage-primitive.sh` and supply independent
   HEAD/tree and `java`/`javac` executable digests.
 
