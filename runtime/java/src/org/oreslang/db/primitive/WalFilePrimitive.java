@@ -118,7 +118,11 @@ final class WalFilePrimitive {
     // receipt an independent virtual-thread handoff. Every handoff retains
     // its admission slot until its synchronous callbacks return, so the
     // existing MAX_OUTSTANDING=32 bound also caps concurrent handoffs.
-    // No task runs on the disk worker or a caller/actor carrier.
+    // Owned disk/handoff tasks never run on caller/actor carriers.
+    // WARNING: a synchronous callback registered *after* the returned
+    // CompletionStage already completed can execute inline on its caller.
+    // Guest admission must schedule all continuations onto an authorized,
+    // generation-fenced runtime executor, including late subscribers.
     handoffWorker = Executors.newThreadPerTaskExecutor(
         Thread.ofVirtual().name("ores-db-wal-handoff-", 0).factory());
   }
