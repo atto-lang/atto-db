@@ -61,6 +61,37 @@ public final class PostgresIntegrationTest {
                     }
                     insert.executeBatch();
                 }
+                // Independent database-role oracle: with no scoped tenant, RLS must
+                // expose zero rows even when a direct SQL client bypasses the pool.
+                // This is defense in depth for admitted host templates, NOT a claim
+                // that a role holding the credential cannot set this custom GUC.
+                try (Connection probe=DriverManager.getConnection(url,role,password)) {
+                    try (Statement statement=probe.createStatement();
+                         ResultSet rows=statement.executeQuery("SELECT count(*) FROM "+schema+".actor_state")) {
+                        check(rows.next() && rows.getLong(1)==0L,
+                              "RLS denied-by-default failed without host tenant context");
+                    }
+                    probe.setAutoCommit(false);
+                    try (PreparedStatement scope=probe.prepareStatement("SELECT set_config('ores.tenant_id', ?, true)")) {
+                        scope.setString(1,"tenant-a");
+                        scope.execute();
+                    }
+                    try (Statement statement=probe.createStatement()) {
+                        try (ResultSet rows=statement.executeQuery(
+                              "SELECT count(*) FROM "+schema+".actor_state WHERE tenant_id='tenant-a'")) {
+                            check(rows.next() && rows.getLong(1)==1000L,
+                                  "RLS incorrectly rejected scoped tenant rows");
+                        }
+                        try (ResultSet rows=statement.executeQuery(
+                              "SELECT count(*) FROM "+schema+".actor_state WHERE tenant_id='tenant-b'")) {
+                            check(rows.next() && rows.getLong(1)==0L,
+                                  "RLS leaked another tenant's rows");
+                        }
+                        check(statement.executeUpdate(
+                              "UPDATE "+schema+".actor_state SET version=version+1 WHERE tenant_id='tenant-b' AND actor_id=0")==0,
+                              "RLS permitted cross-tenant update");
+                    } finally { probe.rollback(); }
+                }
                 var provider=new Source(url,role,password);
                 String read="SELECT tenant_id,actor_id,pg_backend_pid() FROM "+schema+".actor_state WHERE actor_id=?";
                 String write="UPDATE "+schema+".actor_state SET version=version+1 WHERE actor_id=?";
