@@ -42,6 +42,8 @@ public final class WalHandoffLivenessTest {
   private static void run(Path wal) throws Exception {
     CountDownLatch firstIoEntered = new CountDownLatch(1);
     CountDownLatch allowFirstIo = new CountDownLatch(1);
+    CountDownLatch secondIoEntered = new CountDownLatch(1);
+    CountDownLatch allowSecondIo = new CountDownLatch(1);
     CountDownLatch firstCallbackEntered = new CountDownLatch(1);
     CountDownLatch secondCallbackCompleted = new CountDownLatch(1);
     AtomicBoolean firstDispatch = new AtomicBoolean(true);
@@ -52,6 +54,18 @@ public final class WalHandoffLivenessTest {
           try {
             if (!allowFirstIo.await(8, TimeUnit.SECONDS))
               throw new IOException("first I/O barrier timed out");
+          } catch (InterruptedException interruption) {
+            Thread.currentThread().interrupt();
+            throw new IOException(interruption);
+          }
+        } else {
+          // Hold the second disk operation until its callback is attached.
+          // Otherwise a very fast force can complete before thenApply() is
+          // registered, making it run on the test caller (false failure).
+          secondIoEntered.countDown();
+          try {
+            if (!allowSecondIo.await(8, TimeUnit.SECONDS))
+              throw new IOException("second I/O barrier timed out");
           } catch (InterruptedException interruption) {
             Thread.currentThread().interrupt();
             throw new IOException(interruption);
@@ -96,6 +110,9 @@ public final class WalHandoffLivenessTest {
           secondCallbackCompleted.countDown();
           return receipt.sequence();
         });
+        check(secondIoEntered.await(5, TimeUnit.SECONDS),
+            "second disk operation never started");
+        allowSecondIo.countDown();
         check(secondCallback.toCompletableFuture().get(8, TimeUnit.SECONDS) == 2,
             "second independent handoff never completed");
         check(firstCallback.toCompletableFuture().get(8, TimeUnit.SECONDS) == 1,
@@ -103,6 +120,7 @@ public final class WalHandoffLivenessTest {
         check(Files.size(wal) == 62, "serialized WAL bytes changed unexpectedly");
       } finally {
         allowFirstIo.countDown();
+        allowSecondIo.countDown();
         secondCallbackCompleted.countDown();
         primitive.revokeAndCloseAsync().toCompletableFuture().get(15, TimeUnit.SECONDS);
       }
