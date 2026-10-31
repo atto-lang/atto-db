@@ -1,0 +1,32 @@
+// P0 regression: crash/close between the dispatch fence and physical handoff.
+// No untrusted after-the-fact cancellation may claim a definitive abort.
+// This exercises a pure state machine, NOT real filesystem dispatch.
+import module db_single_record_txn from "../../../src/transaction/single_record_gate";
+pub routine main(): void {
+  let mut tx = db_single_record_txn.new_single_record_gate(7, 3, 201);
+  if tx.stage(7, 3, 201, 451, 1118).is_err() ||
+    !tx.seal() || tx.begin_dispatch(4, 451) ||
+    tx.begin_dispatch(3, 452) ||
+    !tx.begin_dispatch(3, 451) ||
+    tx.begin_dispatch(3, 451) || tx.can_acknowledge(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  // Simulates owner shutdown just after fencing dispatch, with no callback.
+  tx.close();
+  if tx.current_phase() != 4 || !tx.is_closed() ||
+    !tx.outcome_indeterminate() || tx.held_bytes() != 1118 ||
+    tx.abort_before_dispatch() || tx.mark_unknown(3, 451) ||
+    tx.stage(7, 3, 201, 452, 31).is_ok() || tx.can_acknowledge(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  // A separate purely queued transaction may still cancel definitively.
+  let mut waiting = db_single_record_txn.new_single_record_gate(7, 3, 202);
+  if waiting.stage(7, 3, 202, 452, 31).is_err() ||
+    !waiting.seal() || !waiting.abort_before_dispatch() ||
+    waiting.outcome_indeterminate() || waiting.held_bytes() != 0 ||
+    waiting.begin_dispatch(3, 452) || waiting.can_acknowledge(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  stdio.stdout.write("db:dispatch-fence-ok");
+  return;
+}

@@ -11,12 +11,12 @@ pub routine main(): void {
     tx.current_phase() != 0 || tx.held_bytes() != 0; then
     stdio.stdout.write("db:FAILED"); return;
   fi
-  if tx.dispatched(3, 42) || tx.mark_unknown(3, 42) ||
+  if tx.begin_dispatch(3, 42) || tx.mark_unknown(3, 42) ||
     tx.stage(7, 3, 100, 42, 1118).is_err() ||
     tx.stage(7, 3, 100, 43, 31).is_ok() ||
-    tx.dispatched(3, 42) || tx.mark_unknown(3, 42) ||
-    !tx.seal() || tx.dispatched(4, 42) ||
-    tx.dispatched(3, 43) || !tx.dispatched(3, 42); then
+    tx.begin_dispatch(3, 42) || tx.mark_unknown(3, 42) ||
+    !tx.seal() || tx.begin_dispatch(4, 42) ||
+    tx.begin_dispatch(3, 43) || !tx.begin_dispatch(3, 42); then
     stdio.stdout.write("db:FAILED"); return;
   fi
   if tx.abort_before_dispatch() || tx.mark_unknown(4, 42) ||
@@ -41,7 +41,7 @@ pub routine main(): void {
   fi
   closing.close();
   if closing.current_phase() != 5 || closing.held_bytes() != 0 ||
-    closing.dispatched(3, 9) || closing.can_acknowledge(); then
+    closing.begin_dispatch(3, 9) || closing.can_acknowledge(); then
     stdio.stdout.write("db:FAILED"); return;
   fi
   stdio.stdout.write("db:single-txn-rejections-ok");

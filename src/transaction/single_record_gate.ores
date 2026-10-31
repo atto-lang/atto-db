@@ -5,8 +5,8 @@
 // transaction, guest-sync-receipt validation, or committed/ACK transition.
 import module storage_policy from "../storage/capability";
 define module db_single_record_txn as
-  // Phases: 0 open, 1 staged, 2 sealed, 3 dispatched,
-  // 4 unknown, 5 definitively aborted before dispatch.
+  // Phases: 0 open, 1 staged, 2 sealed, 3 dispatch-fenced,
+  // 4 unknown, 5 definitively aborted before the dispatch fence.
   pub define class SingleRecordTxn as
     let int tenant;
     let int generation;
@@ -57,10 +57,15 @@ define module db_single_record_txn as
       return true;
     }
 
-    // Called only after the owning runtime has irrevocably handed a validated
-    // immutable frame to the storage dispatch path; never before handoff.
-    // This bookkeeping alone does not perform or prove disk I/O.
-    pub dispatched(mut self)(int owner_generation, int submitted_operation): bool {
+    // CRITICAL ORDERING: the owning actor must establish this phase under its
+    // sealed-state critical loan BEFORE releasing an immutable WAL frame to
+    // any asynchronous storage worker or callback. Never mark dispatch after
+    // the external handoff: a crash in that gap could turn a real write into
+    // a false definitive abort. If the handoff is rejected or its completion
+    // is lost, still treat the outcome as unknown until an independent trusted
+    // no-dispatch proof or durable recovery reconciles the operation.
+    // This metadata-only method is NOT I/O authority or a durability receipt.
+    pub begin_dispatch(mut self)(int owner_generation, int submitted_operation): bool {
       if self.closed || self.phase != 2 ||
         owner_generation != self.generation ||
         submitted_operation != self.operation_id; then
@@ -70,8 +75,9 @@ define module db_single_record_txn as
       return true;
     }
 
-    // Cancellation may definitively abort only BEFORE dispatch. Afterwards
-    // the outcome is unknown until authenticated recovery/reconciliation.
+    // Cancellation may definitively abort only BEFORE begin_dispatch.
+    // Once dispatch has been fenced, do not unwind it from an untrusted
+    // callback, a timeout or a guest-supplied numeric "not sent" indication.
     pub abort_before_dispatch(mut self)(): bool {
       if self.closed || self.phase > 2; then return false; fi
       self.phase = 5;
@@ -89,7 +95,7 @@ define module db_single_record_txn as
       return true;
     }
 
-    // Closing a dispatched owner must NOT convert uncertainty into abort.
+    // Closing a dispatch-fenced owner must NOT convert uncertainty into abort.
     pub close(mut self)(): void {
       if !self.closed; then
         if self.phase == 3; then self.phase = 4; fi

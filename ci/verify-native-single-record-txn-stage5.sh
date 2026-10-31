@@ -40,4 +40,5 @@ run_case() {
 }
 run_case tests/guest/positive/single-record-txn-lifecycle.ores db:single-txn-lifecycle-ok
 run_case tests/guest/negative/single-record-txn-rejections.ores db:single-txn-rejections-ok
+run_case tests/guest/negative/dispatch-handoff-fence.ores db:dispatch-fence-ok
 echo 'SINGLE_RECORD_TXN_BOOKKEEPING_ONLY; NO AUTHENTICATED COMMIT, WAL REPLAY OR DURABILITY CLAIM'
