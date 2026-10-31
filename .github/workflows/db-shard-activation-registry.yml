@@ -35,8 +35,8 @@ jobs:
             [runtime/java/src/org/oreslang/db/primitive/WalActorContinuationGate.java]='402bf509c31a853ff16bf73a3c2687780225f153'
             [runtime/java/src/org/oreslang/db/primitive/ShardPublicationGate.java]='9f24f06632494e0df063b0d8a6bcb1f3bb944f7b'
             [runtime/java/src/org/oreslang/db/primitive/ShardActorHandoffBridge.java]='b53212362ac3382c652b12973d4cc09280cb0f64'
-            [runtime/java/src/org/oreslang/db/primitive/DbShardActivationRegistry.java]='384c08c7d9eae93d620f557edd267079f25f22b4'
-            [runtime/java/test/org/oreslang/db/primitive/DbShardActivationRegistryTest.java]='b7f3bc8cc44b368fe39b3fa34e17c6e68462b2bc'
+            [runtime/java/src/org/oreslang/db/primitive/DbShardActivationRegistry.java]='0a698b571e06a1f8fce58c49df892e9670776c69'
+            [runtime/java/test/org/oreslang/db/primitive/DbShardActivationRegistryTest.java]='c39975fc3b71a83de3d3c530f35293e786e8e821'
           )
           for file in "${!sha[@]}"; do
             test "$(git hash-object "$file")" = "${sha[$file]}"
@@ -63,7 +63,7 @@ jobs:
             runtime/java/src/org/oreslang/db/primitive/ShardActorHandoffBridge.java \
             runtime/java/src/org/oreslang/db/primitive/DbShardActivationRegistry.java \
             runtime/java/test/org/oreslang/db/primitive/DbShardActivationRegistryTest.java
-          printf '%s\n' 'HOST_SHARD_ACTIVATION_REGISTRY_PASS assertions=23 (host-only runtime harness; NOT native guest or durable recovery)' > "$RUNNER_TEMP/expected.txt"
+          printf '%s\n' 'HOST_SHARD_ACTIVATION_REGISTRY_PASS assertions=33 (host-only runtime harness; NOT native guest or durable recovery)' > "$RUNNER_TEMP/expected.txt"
           for round in 1 2 3 4 5; do
             timeout 60s java -cp "$RUNNER_TEMP/db-activation" \
               org.oreslang.db.primitive.DbShardActivationRegistryTest > "$RUNNER_TEMP/actual.txt"
