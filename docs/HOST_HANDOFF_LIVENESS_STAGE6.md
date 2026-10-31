@@ -121,6 +121,45 @@ A native guest test must cover both early and late callback registration.
 This remains a non-waivable P0, not a reason to count source-free Java tests
 as Oreslang guest proof.
 
+
+### Host-only actor continuation gate: bounded non-inline registration
+
+`WalActorContinuationGate` is a new **package-private HOST-ONLY** boundary;
+it is NOT registered as a guest API and does not produce a DB committed ACK.
+A completed `CompletionStage` may invoke `whenComplete` on the actor carrier
+that registers it. The new gate performs only a nonblocking `ArrayBlockingQueue`
+offer of a notice on that path (32 entries). A separate virtual dispatcher
+queries a supplied trusted runtime scheduler and hands the continuation to
+its actor mailbox; the continuation rechecks activation at actual execution.
+If queue admission is exhausted or scheduling fails the gate is poisoned;
+a synchronous CallerRuns-style runtime scheduler is quarantined rather than
+executing guest code on the bridge dispatcher.
+
+The current scheduler interface is a **host contract and mockable seam**,
+not proof of integration into the Graal/LLVM isolate scheduler. Real runtime
+integration must separately authenticate the caller and runtime-owned queue,
+enforce bounded mailbox admission, nonreentrancy, generation fencing and
+never expose the raw `CompletionStage` as a guest suspension handle.
+The runtime must treat `gate.isPoisoned()` as fail-closed; no durable ACK
+can follow dropped/rejected notices. An actor handler must never block
+waiting for a continuation's own shutdown or for a future from this gate.
+
+`WalActorContinuationGateTest` covers early and late completion delivery,
+exact-context identity rejection, stale actor turns, executor rejection,
+CallerRuns-style misconfiguration, and 33rd-notice overflow. For a **local
+isolated Java21 source test**, Git blob hashes for the actual new source and
+test matched the current GitHub blob hashes:
+- source `fbe8d7c35602628a8cf002f8c009139b91a5c27b`;
+- test `40052723624e137638d757047e939f65804d6bb1`.
+
+Those two exact files compiled with `javac -Xlint:all -Werror` and the test
+printed `HOST_WAL_ACTOR_CONTINUATION_GATE_PASS (not Oreslang guest)`
+**10/10 times**. Only the referenced existing `Context` and `Owner`
+types were supplied by minimal compile-time stand-ins for this isolated
+test; the full current Java primitive/grant/host CI matrix was **not**
+compiled or executed in this local test. The exact-HEAD GitHub Actions
+runner in the source organization is still blocked at admission.
+
 ## Outstanding risks
 
 - Client code that blocks *all* 32 receipt handoffs waiting for operations
