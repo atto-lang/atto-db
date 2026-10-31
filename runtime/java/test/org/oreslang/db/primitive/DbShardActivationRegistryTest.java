@@ -198,8 +198,66 @@ public final class DbShardActivationRegistryTest {
     }
   }
 
+  private static void forkedLeaseContention() throws Exception {
+    Path wal = Files.createTempFile("ores-db-forked-lock-", ".wal");
+    Process child = new ProcessBuilder(
+        Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+        "-cp", System.getProperty("java.class.path"),
+        DbShardActivationRegistryTest.class.getName(), "--hold-lease", wal.toString())
+        .redirectErrorStream(true).start();
+    try {
+      var ready = new java.util.concurrent.FutureTask<String>(() -> {
+        var reader = new java.io.BufferedReader(
+            new java.io.InputStreamReader(child.getInputStream()));
+        return reader.readLine();
+      });
+      Thread.ofVirtual().start(ready);
+      check("LEASE_READY".equals(ready.get(5, TimeUnit.SECONDS)),
+          "independent JVM holds WAL lease before contention");
+      try (Harness h = new Harness();
+           FileChannel channel = FileChannel.open(wal,
+               StandardOpenOption.READ, StandardOpenOption.WRITE)) {
+        var key = new DbShardActivationRegistry.ShardKey(7, 11, 9);
+        rejects(() -> h.registry.activateFresh(key, 1, channel),
+            RejectedExecutionException.class,
+            "independent process WAL lock prevents activation");
+      }
+      child.getOutputStream().close();
+      check(child.waitFor(5, TimeUnit.SECONDS) && child.exitValue() == 0,
+          "forked lock holder exits cleanly and releases lease");
+      try (Harness h = new Harness();
+           FileChannel channel = FileChannel.open(wal,
+               StandardOpenOption.READ, StandardOpenOption.WRITE)) {
+        var activated = h.registry.activateFresh(
+            new DbShardActivationRegistry.ShardKey(7, 11, 9), 1, channel);
+        check(activated.generation() == 1,
+            "successful activation follows cross-process lock release");
+        activated.retireAsync().toCompletableFuture().get(8, TimeUnit.SECONDS);
+      }
+    } finally {
+      if (child.isAlive()) child.destroyForcibly().waitFor(5, TimeUnit.SECONDS);
+      Files.deleteIfExists(wal);
+    }
+  }
+
+  private static void holdLease(Path path) throws Exception {
+    try (FileChannel channel = FileChannel.open(path,
+             StandardOpenOption.READ, StandardOpenOption.WRITE);
+         FileLock lock = channel.lock()) {
+      if (!lock.isValid()) throw new IllegalStateException("forked WAL lock invalid");
+      System.out.println("LEASE_READY");
+      System.out.flush();
+      System.in.read();
+    }
+  }
+
   public static void main(String[] args) throws Exception {
+    if (args.length == 2 && "--hold-lease".equals(args[0])) {
+      holdLease(Path.of(args[1]));
+      return;
+    }
     if (args.length != 0) throw new IllegalArgumentException("no parameters expected");
+    forkedLeaseContention();
     run();
     System.out.println("HOST_SHARD_ACTIVATION_REGISTRY_PASS assertions="+assertions+
         " (host-only runtime harness; NOT native guest or durable recovery)");
