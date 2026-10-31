@@ -30,11 +30,11 @@ jobs:
           test -z "$(git status --porcelain --untracked-files=no)"
           declare -A files=(
             [runtime/java/src/org/oreslang/db/primitive/WalFilePrimitive.java]='044af806aefbffeb6ad440d403a10aa6b0e569aa'
-            [runtime/java/src/org/oreslang/db/primitive/WalRuntimeGrant.java]='f3b33fe8853d0978c10c010f45976bdd6314d958'
+            [runtime/java/src/org/oreslang/db/primitive/WalRuntimeGrant.java]='406b0713dd621308f674eeee7bc403844f2df4e4'
             [runtime/java/src/org/oreslang/db/primitive/WalActorContinuationGate.java]='402bf509c31a853ff16bf73a3c2687780225f153'
             [runtime/java/src/org/oreslang/db/primitive/ShardPublicationGate.java]='475e7fd4d4d9294a715df6c08b5e59ee5d98c37b'
-            [runtime/java/src/org/oreslang/db/primitive/ShardActorHandoffBridge.java]='6d01a982b5ae1e81e9d8a3c765d861945261b1f1'
-            [runtime/java/test/org/oreslang/db/primitive/ShardActorHandoffBridgeTest.java]='323c386c7d96252757973220d79826ee2d58b798'
+            [runtime/java/src/org/oreslang/db/primitive/ShardActorHandoffBridge.java]='b53212362ac3382c652b12973d4cc09280cb0f64'
+            [runtime/java/test/org/oreslang/db/primitive/ShardActorHandoffBridgeTest.java]='094e4b66a112e0f65947fb15c23165d4ab4f7557'
           )
           for file in "${!files[@]}"; do
             test "$(git hash-object "$file")" = "${files[$file]}"
