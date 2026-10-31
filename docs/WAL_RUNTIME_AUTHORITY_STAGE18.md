@@ -18,7 +18,7 @@ New tracked `native_db_wal_authorized_writer_test.cpp` covers wrong context/tena
 
 **Actually executed locally** under g++ C++17, `-Wall -Wextra -Wpedantic -Werror -UNDEBUG -pthread -fsanitize=address,undefined`, ASan leak detection on, UBSan halt-on-error: tracked test passed **80 independent sanitized race runs**. Git blob SHA verification was exact:
 - `DbDurableWalFile.hpp`: `da18efd6b14acb8ac5677cf59a0eb25a7dbb4a40`
-- `native_db_wal_authorized_writer_test.cpp`: `68d3f286c6a022b87759bb526eb5aa6bad74a301`
+- `native_db_wal_authorized_writer_test.cpp`: `f31885831e037bc7861ff4f8fd1cd126f1cb442a`
 - Existing `DbWalShardGrantRegistry.hpp`: `80ea864efef1d3d627ef1f35143e569e30279cff`
 
 These are genuine isolated source-exact host tests, **not** a full source-tree CMake/CTest run, backend compiler output or guest actor proof.
