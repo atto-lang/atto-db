@@ -32,7 +32,7 @@ jobs:
             [runtime/java/src/org/oreslang/db/primitive/WalFilePrimitive.java]='044af806aefbffeb6ad440d403a10aa6b0e569aa'
             [runtime/java/src/org/oreslang/db/primitive/WalRuntimeGrant.java]='406b0713dd621308f674eeee7bc403844f2df4e4'
             [runtime/java/src/org/oreslang/db/primitive/WalActorContinuationGate.java]='402bf509c31a853ff16bf73a3c2687780225f153'
-            [runtime/java/src/org/oreslang/db/primitive/ShardPublicationGate.java]='914cf5ac13c6de762058e214f1e3dbf3a1fe9c8f'
+            [runtime/java/src/org/oreslang/db/primitive/ShardPublicationGate.java]='9f24f06632494e0df063b0d8a6bcb1f3bb944f7b'
             [runtime/java/src/org/oreslang/db/primitive/ShardActorHandoffBridge.java]='b53212362ac3382c652b12973d4cc09280cb0f64'
             [runtime/java/test/org/oreslang/db/primitive/ShardActorHandoffBridgeTest.java]='094e4b66a112e0f65947fb15c23165d4ab4f7557'
           )
