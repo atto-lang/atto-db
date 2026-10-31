@@ -20,7 +20,7 @@ dependency access):
 ```sh
 # From the repository root after independently reviewing and checking out
 # the exact PR-head commit; do not substitute an unreviewed floating branch.
-EXPECTED_HEAD_SHA=<reviewed-40-character-commit> \
+EXPECTED_HEAD_SHA=YOUR_REVIEWED_40_HEX_SHA \
   bash scripts/verify-disposable-postgres17.sh
 ```
 
