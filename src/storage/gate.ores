@@ -31,8 +31,7 @@ define module storage_gate as
     // The runtime must authenticate tenant and source generation separately;
     // a successful result is NOT a permission grant.
     pub admit(mut self)(int tenant, int message_generation,
-                        int operation_id, int frame_bytes):
-        Result<int, String> {
+                        int operation_id, int frame_bytes): Result<int, String> {
       if self.closed; then return Err("owner_closed"); fi
       if message_generation != self.generation; then
         return Err("stale_generation");
