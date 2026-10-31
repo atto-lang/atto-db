@@ -94,6 +94,37 @@ public final class WalActorContinuationGateTest {
       check(action != null, "missing mailbox action");
       action.run();
       check(called.get() == 0, "stale actor callback was executed");
+      check(gate.isPoisoned(), "stale generation silently discarded sync evidence");
+    }
+  }
+
+  private static void staleBeforeDispatchPoisons() throws Exception {
+    CountDownLatch inspected = new CountDownLatch(1);
+    AtomicInteger dispatched = new AtomicInteger();
+    AtomicInteger called = new AtomicInteger();
+    var stale = new WalActorContinuationGate.RuntimeQueue() {
+      public boolean isCurrent(WalRuntimeGrant.Context ctx) {
+        inspected.countDown();
+        return false;
+      }
+      public void dispatch(WalRuntimeGrant.Context ctx, Runnable task) {
+        dispatched.incrementAndGet();
+      }
+    };
+    try (WalActorContinuationGate gate =
+           WalActorContinuationGate.fromTrustedRuntime(CONTEXT, stale)) {
+      gate.register(CONTEXT, CompletableFuture.completedFuture(12),
+          (v, e) -> called.incrementAndGet());
+      waitFor(inspected, "stale generation predispatch check never happened");
+      for (int i = 0; i < 200 && !gate.isPoisoned(); ++i)
+        Thread.sleep(5);
+      check(gate.isPoisoned(), "predispatch stale generation left gate healthy");
+      check(dispatched.get() == 0 && called.get() == 0,
+            "stale predispatch receipt escaped into runtime");
+      try {
+        gate.register(CONTEXT, CompletableFuture.completedFuture(1), (v, e) -> {});
+        throw new AssertionError("poisoned stale gate accepted a new receipt");
+      } catch (RejectedExecutionException expected) { }
     }
   }
 
@@ -294,6 +325,7 @@ public final class WalActorContinuationGateTest {
   public static void main(String[] args) throws Exception {
     earlyAndLate();
     staleDeliveryFailsClosed();
+    staleBeforeDispatchPoisons();
     rejectedRuntimePoisons();
     callerRunsRejected();
     uncheckedRuntimeErrorPoisons();
