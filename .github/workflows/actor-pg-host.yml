@@ -49,4 +49,6 @@ jobs:
           ORES_TEST_PG_URL: jdbc:postgresql://localhost:5432/postgres?connectTimeout=10&socketTimeout=40
           ORES_TEST_PG_ADMIN_USER: postgres
           ORES_TEST_PG_ADMIN_PASSWORD: local-ephemeral-only
-        run: java -cp "build/pg-host:build/pg-jdbc/*" dev.oreslang.db.PostgresIntegrationTest
+        run: |
+          java -cp "build/pg-host:build/pg-jdbc/*" dev.oreslang.db.PostgresIntegrationTest
+          java -cp "build/pg-host:build/pg-jdbc/*" dev.oreslang.db.PostgresPrincipalIsolationTest
