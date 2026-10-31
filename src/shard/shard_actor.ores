@@ -1,0 +1,29 @@
+// Stage 11: native actor boundary for one serialized DB shard.
+// This file is a FAIL-CLOSED guest-side shell, not an executable DB.
+// The Java ShardPublicationGate is HOST-ONLY, not a guest API or imported
+// storage capability. Until the runtime supplies an authenticated, opaque,
+// non-DATA-sendable storage handle and generation-fenced scheduler turn,
+// NO guest request may read, write, publish, or receive a committed ACK.
+define isolated actor DbShardActor as
+  state {
+    closed: bool = true;
+    poisoned: bool = true;
+    active_generation: int = 0;
+    pending_operation: int = 0;
+    published_sequence: int = 0;
+  }
+
+  // Explicitly reject even well-formed untrusted DATA messages. A future
+  // compiled actor implementation must validate runtime authority before
+  // leasing mutable sealed state, then release critical-write BEFORE await.
+  // No guest metadata can manufacture a WalRuntimeGrant.Context.
+  receive(ActorMail<int> mail): void {
+    self.handle_state(critical-write |s| -> {
+      s.closed = true;
+      s.poisoned = true;
+      s.pending_operation = 0;
+    });
+    self.end();
+    return;
+  }
+end
