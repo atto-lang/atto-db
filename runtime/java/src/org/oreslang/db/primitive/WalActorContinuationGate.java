@@ -95,8 +95,16 @@ final class WalActorContinuationGate implements AutoCloseable {
             return;
           }
           // Recheck at actual actor turn execution, not just dispatch.
-          if (!retired && !poisoned && runtime.isCurrent(context))
-            continuation.accept(value, error);
+          // Errors from this LATER actor turn are outside the gate dispatcher
+          // and must independently poison the gate rather than silently
+          // losing an authenticated receipt during actor scheduling.
+          try {
+            if (!retired && !poisoned && runtime.isCurrent(context))
+              continuation.accept(value, error);
+          } catch (RuntimeException | Error actorFailure) {
+            poisoned = true;
+            throw actorFailure;
+          }
         });
       };
       if (!retired && !poisoned && !pending.offer(notice)) poisoned = true;
