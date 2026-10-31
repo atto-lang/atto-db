@@ -160,6 +160,37 @@ test; the full current Java primitive/grant/host CI matrix was **not**
 compiled or executed in this local test. The exact-HEAD GitHub Actions
 runner in the source organization is still blocked at admission.
 
+
+### Deferred actor-turn failure after successful scheduler admission (additional P0)
+
+A two-phase scheduler check can succeed before a receipt is enqueued and
+later throw when that continuation runs on the actor's own execution thread.
+An exception thrown in this **later** turn is outside the virtual bridge
+dispatcher's catch block. Previously, this lost the callback but left
+`WalActorContinuationGate.isPoisoned()` false: fail-closed runtime
+integrations could incorrectly treat the gate as healthy.
+
+The actor-turn wrapper now catches `RuntimeException | Error` around its
+second `runtime.isCurrent(context)` check **and the actual continuation**,
+poisons the gate, then rethrows for the owning runtime to handle. It never
+converts that failure into an authenticated storage receipt or ACK.
+
+`WalActorContinuationGateTest.deferredActorFailurePoisons` covers both an
+activation check that throws **after** queue admission and a guest callback
+that throws after a successful activation check. It asserts the gate is
+poisoned and refuses subsequent registration. The committed source blobs
+were locally reconstructed and checked using `git hash-object`:
+- `WalActorContinuationGate.java` `58a968257599c179a24974564c7519e30cc1338b`
+- `WalActorContinuationGateTest.java` `e7bcf30f9c65e4cfa2ccae1d0adeb8fc04f78c1e`.
+
+Both files compiled on local OpenJDK 21 with `-Xlint:all -Werror`
+using only minimal existing-type stand-ins and the actual byte-exact new
+source/test. **20/20 regression runs passed**. A red control reverting
+just the deferred actor-turn catch **failed as expected** with
+`AssertionError: deferred activation failure left gate healthy`.
+This is local source-targeted Java evidence, **not** a complete exact-head
+PR13 six-suite build, a guest scheduler test or a crash-durability claim.
+
 ## Outstanding risks
 
 - Client code that blocks *all* 32 receipt handoffs waiting for operations
