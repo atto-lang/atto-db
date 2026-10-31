@@ -1,0 +1,52 @@
+// Guest only: local admission/accounting contract, NOT durable I/O or auth.
+// Exact stdout: db:storage-admission-ok (no final newline).
+import module storage_gate from "../../../src/storage/gate";
+pub routine main(): void {
+  let mut gate = storage_gate.new_gate(3);
+  if gate.admit(7, 4, 1, 31).is_ok() ||
+    gate.admit(0, 3, 1, 31).is_ok() ||
+    gate.admit(7, 3, 0, 31).is_ok() ||
+    gate.admit(7, 3, 1, 30).is_ok() ||
+    gate.admit(7, 3, 1, 1119).is_ok(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  if gate.admit(7, 3, 1, 31).is_err() ||
+    gate.admit(7, 3, 1, 31).is_ok() ||
+    gate.queued_or_inflight() != 1 || gate.admitted_bytes() != 31; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  if !gate.dispatch(1) || gate.dispatch(1) ||
+    gate.cancel_queued(1) || !gate.mark_unknown(1) ||
+    gate.mark_unknown(1) || gate.phase(1) != 3 ||
+    gate.active_operation() != 1; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  for (let i = 2; i <= 32; i++) {
+    if gate.admit(7, 3, i, 1118).is_err(); then
+      stdio.stdout.write("db:FAILED"); return;
+    fi
+  }
+  if gate.queued_or_inflight() != 32 ||
+    gate.admitted_bytes() != 34689 ||
+    gate.admit(7, 3, 33, 31).is_ok() ||
+    gate.dispatch(2) || gate.cancel_queued(1) ||
+    !gate.cancel_queued(2) ||
+    gate.cancel_queued(2) ||
+    gate.queued_or_inflight() != 31 ||
+    gate.admitted_bytes() != 33571 ||
+    gate.phase(2) != 0; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  if gate.admit(7, 3, 33, 31).is_err() ||
+    gate.queued_or_inflight() != 32 || gate.dispatch(33); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  gate.close();
+  if !gate.is_closed() || gate.admit(7, 3, 34, 31).is_ok() ||
+    gate.cancel_queued(33) || gate.dispatch(33) ||
+    gate.queued_or_inflight() != 32 || gate.phase(1) != 3; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  stdio.stdout.write("db:storage-admission-ok");
+  return;
+}

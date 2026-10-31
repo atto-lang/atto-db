@@ -1,0 +1,32 @@
+// DB storage admission metadata only. NOT an authority/capability token.
+// No public .ores value can grant directory/FD access or attest a sync.
+define module storage_policy as
+  // A WAL frame is at least 31 and at most 1118 bytes (v1).
+  // This checks only bounded metadata. The WAL frame codec must separately
+  // validate the complete wire bytes, and a trusted runtime must authenticate
+  // actor, tenant, isolate, activation generation, and storage directory.
+  pub fnc validate_frame_request(int tenant, int generation,
+                                 int operation_id, int frame_bytes):
+      Result<int, String> {
+    if tenant <= 0 || tenant > 2147483647; then
+      return Err("invalid_tenant");
+    fi
+    if generation <= 0 || generation > 2147483647; then
+      return Err("invalid_generation");
+    fi
+    if operation_id <= 0 || operation_id > 2147483647; then
+      return Err("invalid_operation_id");
+    fi
+    if frame_bytes < 31 || frame_bytes > 1118; then
+      return Err("invalid_frame_length");
+    fi
+    return Ok(frame_bytes);
+  }
+
+  // Awaitable runtime boundary, intentionally NOT implemented by this
+  // module. Do not substitute fs.append_text/fs.write_text: neither proves
+  // fdatasync/fsync, durable directory metadata, canonical openat admission,
+  // nor unforgeable storage ownership. No user-constructed "capability" class
+  // or integer ID is sufficient. Runtime must supply a non-DATA-sendable
+  // opaque handle and a generation-fenced verified durability receipt.
+end
