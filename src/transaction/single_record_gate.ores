@@ -1,0 +1,121 @@
+// Stage 5: pure, bounded single-record transaction state machine.
+// This is NOT a durable commit, credential, or WAL authority. Retain it in
+// one isolated actor's sealed state; do not transfer it by DATA mailbox.
+// ODB1 encodes a single PUT/DELETE only. There is deliberately no multi-key
+// transaction, guest-sync-receipt validation, or committed/ACK transition.
+import module storage_policy from "../storage/capability";
+define module db_single_record_txn as
+  // Phases: 0 open, 1 staged, 2 sealed, 3 dispatched,
+  // 4 unknown, 5 definitively aborted before dispatch.
+  pub define class SingleRecordTxn as
+    let int tenant;
+    let int generation;
+    let int transaction_id;
+    let mut int operation_id = 0;
+    let mut int frame_bytes = 0;
+    let mut int phase = 0;
+    let mut bool closed = false;
+
+    pub constructor(int tenant, int generation, int transaction_id) {
+      if tenant <= 0 || tenant > 2147483647 ||
+        generation <= 0 || generation > 2147483647 ||
+        transaction_id <= 0 || transaction_id > 2147483647; do
+        rt fail("db_txn: invalid bound identity");
+      fi
+      self.tenant = tenant;
+      self.generation = generation;
+      self.transaction_id = transaction_id;
+    }
+
+    // One operation per transaction for the ODB1 WAL wire contract.
+    // Numeric identity is only metadata: the trusted runtime must authenticate
+    // caller, tenant, isolate, shard and actor generation independently.
+    pub stage(mut self)(int sender_tenant, int sender_generation,
+                        int requested_transaction, int requested_operation,
+                        int requested_frame_bytes): Result<int, String> {
+      if self.closed; then return Err("closed"); fi
+      if self.phase != 0; then return Err("invalid_phase"); fi
+      if sender_tenant != self.tenant ||
+        sender_generation != self.generation ||
+        requested_transaction != self.transaction_id; then
+        return Err("wrong_owner");
+      fi
+      val check = storage_policy.validate_frame_request(
+        sender_tenant, sender_generation, requested_operation,
+        requested_frame_bytes);
+      if check.is_err(); then return Err("invalid_frame_metadata"); fi
+      self.operation_id = requested_operation;
+      self.frame_bytes = requested_frame_bytes;
+      self.phase = 1;
+      return Ok(self.frame_bytes);
+    }
+
+    // Sealing does NOT allocate a WAL sequence or commit anything.
+    pub seal(mut self)(): bool {
+      if self.closed || self.phase != 1; then return false; fi
+      self.phase = 2;
+      return true;
+    }
+
+    // Called only after the owning runtime has irrevocably handed a validated
+    // immutable frame to the storage dispatch path; never before handoff.
+    // This bookkeeping alone does not perform or prove disk I/O.
+    pub dispatched(mut self)(int owner_generation, int submitted_operation): bool {
+      if self.closed || self.phase != 2 ||
+        owner_generation != self.generation ||
+        submitted_operation != self.operation_id; then
+        return false;
+      fi
+      self.phase = 3;
+      return true;
+    }
+
+    // Cancellation may definitively abort only BEFORE dispatch. Afterwards
+    // the outcome is unknown until authenticated recovery/reconciliation.
+    pub abort_before_dispatch(mut self)(): bool {
+      if self.closed || self.phase > 2; then return false; fi
+      self.phase = 5;
+      self.frame_bytes = 0;
+      return true;
+    }
+
+    pub mark_unknown(mut self)(int owner_generation, int submitted_operation): bool {
+      if self.closed || self.phase != 3 ||
+        owner_generation != self.generation ||
+        submitted_operation != self.operation_id; then
+        return false;
+      fi
+      self.phase = 4;
+      return true;
+    }
+
+    // Closing a dispatched owner must NOT convert uncertainty into abort.
+    pub close(mut self)(): void {
+      if !self.closed; then
+        if self.phase == 3; then self.phase = 4; fi
+        if self.phase <= 2; then
+          self.phase = 5;
+          self.frame_bytes = 0;
+        fi
+        self.closed = true;
+      fi
+      return;
+    }
+
+    // No guest-visible way to construct an authenticated sync receipt.
+    // Therefore there is NO committed phase and NO ACK in this stage.
+    pub can_acknowledge(): bool { return false; }
+    pub current_phase(): int { return self.phase; }
+    pub held_bytes(): int { return self.frame_bytes; }
+    pub bound_operation(): int { return self.operation_id; }
+    pub is_closed(): bool { return self.closed; }
+    pub outcome_indeterminate(): bool {
+      return self.phase == 3 || self.phase == 4;
+    }
+  end
+
+  pub fnc new_single_record_gate(int tenant, int generation,
+                                 int transaction_id): SingleRecordTxn {
+    return new SingleRecordTxn(tenant, generation, transaction_id);
+  }
+end
