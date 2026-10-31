@@ -16,41 +16,47 @@ pub routine main(): void {
     duplicate.is_err() || foreign.is_err() || old.is_err(); then
     stdio.stdout.write("db:FAILED"); return;
   fi
+  val a_bytes = a.unwrap();
+  val b_bytes = b.unwrap();
+  val gap_bytes = gap.unwrap();
+  val duplicate_bytes = duplicate.unwrap();
+  val foreign_bytes = foreign.unwrap();
+  val old_bytes = old.unwrap();
   let List<int> corrupt_middle = new List<int>();
   let List<int> invalid_magic = new List<int>();
-  for (let i = 0; i < a.unwrap().length; i++) {
+  for (let i = 0; i < a_bytes.length; i++) {
     if i == 26; then corrupt_middle.add(108);
-    else corrupt_middle.add(a.unwrap().get(i)); fi
+    else corrupt_middle.add(a_bytes.get(i)); fi
     if i == 0; then invalid_magic.add(0);
-    else invalid_magic.add(a.unwrap().get(i)); fi
+    else invalid_magic.add(a_bytes.get(i)); fi
   }
-  for (const byte of b.unwrap()) { corrupt_middle.add(byte); }
+  for (const byte of b_bytes) { corrupt_middle.add(byte); }
   let List<int> bad_sequence = new List<int>();
   let List<int> bad_operation = new List<int>();
   let List<int> bad_tenant = new List<int>();
   let List<int> bad_generation = new List<int>();
-  for (const byte of a.unwrap()) {
+  for (const byte of a_bytes) {
     bad_sequence.add(byte);
     bad_operation.add(byte);
     bad_tenant.add(byte);
     bad_generation.add(byte);
   }
-  for (const byte of gap.unwrap()) { bad_sequence.add(byte); }
-  for (const byte of duplicate.unwrap()) { bad_operation.add(byte); }
-  for (const byte of foreign.unwrap()) { bad_tenant.add(byte); }
-  for (const byte of old.unwrap()) { bad_generation.add(byte); }
+  for (const byte of gap_bytes) { bad_sequence.add(byte); }
+  for (const byte of duplicate_bytes) { bad_operation.add(byte); }
+  for (const byte of foreign_bytes) { bad_tenant.add(byte); }
+  for (const byte of old_bytes) { bad_generation.add(byte); }
 
   let List<int> short_tail = new List<int>();
-  for (const byte of a.unwrap()) { short_tail.add(byte); }
+  for (const byte of a_bytes) { short_tail.add(byte); }
   short_tail.add(79); short_tail.add(68);
 
   let List<int> over = new List<int>();
   for (let i = 0; i < 35777; i++) { over.add(0); }
 
   let List<int> malformed_byte = new List<int>();
-  for (let i = 0; i < a.unwrap().length; i++) {
+  for (let i = 0; i < a_bytes.length; i++) {
     if i == 20; then malformed_byte.add(256);
-    else malformed_byte.add(a.unwrap().get(i)); fi
+    else malformed_byte.add(a_bytes.get(i)); fi
   }
   if wal_replay_window.inspect(7, 1, 0, corrupt_middle).is_ok() ||
     wal_replay_window.inspect(7, 1, 0, invalid_magic).is_ok() ||
@@ -61,9 +67,9 @@ pub routine main(): void {
     wal_replay_window.inspect(7, 1, 0, short_tail).is_ok() ||
     wal_replay_window.inspect(7, 1, 0, over).is_ok() ||
     wal_replay_window.inspect(7, 1, 0, malformed_byte).is_ok() ||
-    wal_replay_window.inspect(0, 1, 0, a.unwrap()).is_ok() ||
-    wal_replay_window.inspect(7, 0, 0, a.unwrap()).is_ok() ||
-    wal_replay_window.inspect(7, 1, -1, a.unwrap()).is_ok(); then
+    wal_replay_window.inspect(0, 1, 0, a_bytes).is_ok() ||
+    wal_replay_window.inspect(7, 0, 0, a_bytes).is_ok() ||
+    wal_replay_window.inspect(7, 1, -1, a_bytes).is_ok(); then
     stdio.stdout.write("db:FAILED"); return;
   fi
   stdio.stdout.write("db:replay-rejections-ok");
