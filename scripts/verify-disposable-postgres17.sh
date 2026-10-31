@@ -57,7 +57,7 @@ for source in "${sources[@]}"; do
 done
 mkdir -p "$workdir/classes" "$workdir/jdbc"
 javac -d "$workdir/classes" "${sources[@]}"
-for test in PoolLimitsTest ActorPgPoolTest JdbcRollbackSafetyTest JdbcTransactionSafetyTest; do
+for test in PoolLimitsTest ActorPgPoolTest JdbcRollbackSafetyTest JdbcTransactionSafetyTest ActorPgPrincipalPoolTest; do
   java -cp "$workdir/classes" "dev.oreslang.db.$test"
 done
 mvn -B -ntp -f host-reference/pom.xml dependency:copy-dependencies \
