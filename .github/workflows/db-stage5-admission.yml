@@ -1,0 +1,54 @@
+# Runner admission and source-only checks. Does NOT attest Oreslang guest or durability.
+name: OresDB stage5 admission and source-only smoke (NOT guest)
+on:
+  push:
+    branches:
+      - feat/native-db-single-record-txn-stage5-20261031
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  admission-canary:
+    name: Source-free runner admission canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Confirm an actual step executed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          echo 'RUNNER_ADMISSION_EXECUTED; NOT ORESLANG GUEST OR DB DURABILITY'
+  source-contract:
+    name: Source-only fence and shell checks (NOT guest)
+    needs: admission-canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout source commit without persisted credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Check exact push HEAD and dispatch fence source contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          sh -n ci/verify-native-single-record-txn-stage5.sh
+          grep -Fq 'pub begin_dispatch(mut self)' src/transaction/single_record_gate.ores
+          grep -Fq 'self.closed || self.phase > 2' src/transaction/single_record_gate.ores
+          grep -Fq 'if self.phase == 3; then self.phase = 4; fi' src/transaction/single_record_gate.ores
+          grep -Fq 'pub can_acknowledge(): bool { return false; }' src/transaction/single_record_gate.ores
+          if grep -Fq 'pub dispatched(mut self)' src/transaction/single_record_gate.ores; then
+            echo 'UNSAFE_POST_HANDOFF_DISPATCH_API' >&2
+            exit 1
+          fi
+          for file in \
+              tests/guest/positive/single-record-txn-lifecycle.ores \
+              tests/guest/negative/single-record-txn-rejections.ores \
+              tests/guest/negative/dispatch-handoff-fence.ores; do
+            test -s "$file"
+          done
+          grep -Fq 'run_case tests/guest/negative/dispatch-handoff-fence.ores db:dispatch-fence-ok' \
+            ci/verify-native-single-record-txn-stage5.sh
+          echo 'SOURCE_ONLY_CHECK_EXECUTED; NO COMPILER, GUEST, WAL FSYNC, CRASH OR DURABILITY CLAIM'
