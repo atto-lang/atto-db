@@ -36,19 +36,23 @@ public final class ActorPgPool implements AutoCloseable {
     }
     private final class Submission extends CompletableFuture<Outcome> {
         private Job job;
+        /** Cancellation is definitive only while queued. Dispatch may already have side effects. */
         @Override public boolean cancel(boolean interrupt) {
-            boolean changed = super.cancel(false);
-            if (changed) synchronized (gate) {
+            synchronized (gate) {
                 ArrayDeque<Job> queue = pending.get(job.capability.tenant);
-                if (queue != null && queue.remove(job)) {
-                    if (queue.isEmpty()) {
-                        pending.remove(job.capability.tenant);
-                        ready.removeIf(job.capability.tenant::equals);
-                    }
-                    release(job.capability.tenant);
+                if (queue == null || !queue.remove(job)) {
+                    // JDBC work has been claimed by an owner (or already completed).
+                    // Do not report successful cancellation of an uncertain write.
+                    return false;
                 }
+                if (queue.isEmpty()) {
+                    pending.remove(job.capability.tenant);
+                    ready.removeIf(job.capability.tenant::equals);
+                }
+                release(job.capability.tenant);
             }
-            return changed;
+            // CompletableFuture user callbacks must not run while holding the pool gate.
+            return super.cancel(false);
         }
     }
     private record Job(Capability capability, Template template, List<Object> arguments, Submission completion) { }
@@ -98,7 +102,8 @@ public final class ActorPgPool implements AutoCloseable {
     }
 
     public Capability grantTenant(String tenant, Set<String> allowedIds) {
-        if (tenant == null || tenant.isBlank() || tenant.length() > 256)
+        if (tenant == null || tenant.isBlank() || tenant.length() > 256 ||
+            tenant.codePoints().anyMatch(Character::isISOControl))
             throw new IllegalArgumentException("invalid tenant");
         Set<String> ids = Set.copyOf(allowedIds);
         if (ids.isEmpty() || !templates.keySet().containsAll(ids))
