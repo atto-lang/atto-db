@@ -1,6 +1,6 @@
 # Actor-shared PostgreSQL host reference
 
-This is a JDBC host adapter demonstration, not native Oreslang guest execution. Actors receive revocable, host-issued tenant capabilities rather than direct TCP connections. Each JDBC owner controls exactly one connection; fixed pool limits, per-tenant round-robin, bounded asynchronous completion, read/write templates, transaction-local tenant context, cancellation and revocation are covered by deterministic tests.
+This is a JDBC host adapter demonstration, not native Oreslang guest execution. Actors receive revocable, host-issued tenant capabilities rather than direct TCP connections. Each JDBC owner controls exactly one connection; fixed pool limits, per-tenant round-robin, bounded asynchronous completion, read/write templates, transaction-local tenant context, queued-only cancellation and revocation are covered by deterministic tests. `cancel()` returns `false` once a JDBC owner has claimed a job; cancelling an in-flight write must never be reported as a successful abort. Revocation after dispatch reports an indeterminate outcome, not proof of rollback.
 
 **Local Java 21 tests**
 ```sh
