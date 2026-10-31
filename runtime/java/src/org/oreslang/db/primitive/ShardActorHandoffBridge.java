@@ -31,6 +31,8 @@ final class ShardActorHandoffBridge {
                                   ShardPublicationGate.RuntimeAuthority actorTurn) {
     context = Objects.requireNonNull(ctx);
     writer = Objects.requireNonNull(grant);
+    if (!writer.isBoundTo(ctx))
+      throw new SecurityException("foreign or revoked WAL runtime grant");
     Objects.requireNonNull(mailbox);
     Objects.requireNonNull(actorTurn);
     handoff = WalActorContinuationGate.fromTrustedRuntime(ctx, mailbox);
@@ -93,7 +95,8 @@ final class ShardActorHandoffBridge {
 
   /** A healthy handoff is required for every subsequent read and write. */
   private void checkUsable() {
-    if (retired || quarantined || handoff.isPoisoned()) {
+    if (retired || quarantined || handoff.isPoisoned() ||
+        !writer.isBoundTo(context)) {
       quarantined = true;
       throw new RejectedExecutionException(
           "shard outcome UNKNOWN or retired; reconcile before restart");
