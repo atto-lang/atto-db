@@ -81,7 +81,9 @@ final class WalActorContinuationGate implements AutoCloseable {
     Objects.requireNonNull(source);
     Objects.requireNonNull(continuation);
     if (retired || poisoned) throw new RejectedExecutionException("actor gate retired");
-    source.whenComplete((value, error) -> {
+    // Failed callback registration must quarantine the pending receipt.
+    try {
+      source.whenComplete((value, error) -> {
       // whenComplete can be inline for a completed stage. Only a bounded offer
       // happens here, never guest callback, scheduler admission, or blocking I/O.
       Runnable notice = () -> {
@@ -118,7 +120,11 @@ final class WalActorContinuationGate implements AutoCloseable {
         });
       };
       if (!retired && !poisoned && !pending.offer(notice)) poisoned = true;
-    });
+      });
+    } catch (RuntimeException | Error registrationFailure) {
+      poisoned = true;
+      throw registrationFailure;
+    }
   }
 
   boolean isPoisoned() { return poisoned; }
