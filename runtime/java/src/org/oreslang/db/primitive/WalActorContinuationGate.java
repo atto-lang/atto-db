@@ -49,8 +49,11 @@ final class WalActorContinuationGate implements AutoCloseable {
           Thread.currentThread().interrupt();
           poisoned = true; // no untrusted fallback inline
           break;
-        } catch (RuntimeException dispatchFailure) {
-          poisoned = true; // fail shut; runtime must reconcile, never ACK
+        } catch (RuntimeException | Error dispatchFailure) {
+          // Trusted runtime hooks can throw unchecked errors (including
+          // AssertionError). Never let the worker die with isPoisoned()==false:
+          // lost receipts must not be mistaken for an admitted DB ACK.
+          poisoned = true;
           break;
         }
       }
