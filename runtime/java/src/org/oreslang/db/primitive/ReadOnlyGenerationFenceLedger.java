@@ -294,4 +294,3 @@ final class ReadOnlyGenerationFenceLedger {
     return bytes;
   }
 }
-
