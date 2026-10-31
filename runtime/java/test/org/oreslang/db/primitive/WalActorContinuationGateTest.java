@@ -285,6 +285,28 @@ public final class WalActorContinuationGateTest {
     }
   }
 
+  private static void failingStageRegistrationPoisons() throws Exception {
+    var stage = new CompletableFuture<Integer>() {
+      @Override public CompletableFuture<Integer> whenComplete(
+          java.util.function.BiConsumer<? super Integer, ? super Throwable> callback) {
+        throw new AssertionError("injected registration failure");
+      }
+    };
+    var runtime = new WalActorContinuationGate.RuntimeQueue() {
+      public boolean isCurrent(WalRuntimeGrant.Context ctx) { return true; }
+      public void dispatch(WalRuntimeGrant.Context ctx, Runnable task) { task.run(); }
+    };
+    try (var gate = WalActorContinuationGate.fromTrustedRuntime(CONTEXT, runtime)) {
+      try {
+        gate.register(CONTEXT, stage, (value, error) -> {});
+        throw new AssertionError("unexpected admission");
+      } catch (AssertionError expected) {
+        check("injected registration failure".equals(expected.getMessage()), "wrong failure");
+      }
+      check(gate.isPoisoned(), "registration failure left gate healthy");
+    }
+  }
+
   private static void boundedQueuePoisons() throws Exception {
     CountDownLatch occupied = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
@@ -330,6 +352,7 @@ public final class WalActorContinuationGateTest {
     callerRunsRejected();
     uncheckedRuntimeErrorPoisons();
     deferredActorFailurePoisons();
+    failingStageRegistrationPoisons();
     boundedQueuePoisons();
     System.out.println("HOST_WAL_ACTOR_CONTINUATION_GATE_PASS (not Oreslang guest)");
   }
