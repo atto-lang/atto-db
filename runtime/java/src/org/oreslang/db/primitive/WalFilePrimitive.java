@@ -247,9 +247,10 @@ final class WalFilePrimitive {
           handoffWorker.shutdown();
           if (!handoffWorker.awaitTermination(30, TimeUnit.SECONDS))
             throw new IllegalStateException("handoff not quiescent; preserve open FD");
-          // The file descriptor belongs to the owner until ALL I/O and
-          // completion callbacks have quiesced. An exception above preserves
-          // the FD rather than allowing a stale callback to outlive closure.
+          // Only disk and owned handoff-executor tasks are now quiescent.
+          // A client may schedule its own CompletionStage continuations on
+          // other executors. Those NEVER receive this FD; the actual runtime
+          // must independently generation-fence any actor-state reentry.
           channel.close();
           completion.complete(null);
         } catch (Exception failure) {
