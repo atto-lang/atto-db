@@ -1,0 +1,55 @@
+name: DB host ODC1 checkpoint candidate (not guest or durability)
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/db-odc1-checkpoint-candidate.yml'
+      - 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java'
+      - 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyCheckpointManifest.java'
+      - 'runtime/java/test/org/oreslang/db/primitive/ReadOnlyCheckpointManifestTest.java'
+permissions:
+  contents: read
+jobs:
+  odc1-readonly:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Verify exact PR head and source blobs
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          test "$(git hash-object runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java)" = '8da48ec37b5a2ab8cb141c2403669fce6ffb6024'
+          test "$(git hash-object runtime/java/src/org/oreslang/db/primitive/ReadOnlyCheckpointManifest.java)" = 'a3ad714942edecbc8030a52685f62deeae80aaf7'
+          test "$(git hash-object runtime/java/test/org/oreslang/db/primitive/ReadOnlyCheckpointManifestTest.java)" = '7d16e128fd6ac80bb98a3133f00707f93155e519'
+          echo "SOURCE_COMMIT=$(git rev-parse HEAD)"
+          echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Compile and execute exact read-only ODC1 recovery candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -version
+          javac -version
+          sha256sum "$(readlink -f "$(command -v java)")" "$(readlink -f "$(command -v javac)")"
+          mkdir -p "$RUNNER_TEMP/odc1-classes"
+          javac -Xlint:all -Werror -d "$RUNNER_TEMP/odc1-classes" \
+            runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java \
+            runtime/java/src/org/oreslang/db/primitive/ReadOnlyCheckpointManifest.java \
+            runtime/java/test/org/oreslang/db/primitive/ReadOnlyCheckpointManifestTest.java
+          printf '%s\n' 'HOST_ODC1_CHECKPOINT_CANDIDATE_PASS checks=37 (host-only read-only candidate; NOT guest, commit, lease or power-loss proof)' > "$RUNNER_TEMP/expected.txt"
+          for round in 1 2 3 4 5; do
+            timeout 30s java -cp "$RUNNER_TEMP/odc1-classes" \
+              org.oreslang.db.primitive.ReadOnlyCheckpointManifestTest > "$RUNNER_TEMP/actual.txt"
+            cmp "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt"
+            cat "$RUNNER_TEMP/actual.txt"
+          done
