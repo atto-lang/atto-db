@@ -191,6 +191,37 @@ just the deferred actor-turn catch **failed as expected** with
 This is local source-targeted Java evidence, **not** a complete exact-head
 PR13 six-suite build, a guest scheduler test or a crash-durability claim.
 
+## Stale-generation receipt drop is a poisoned gate (2026-10-31)
+
+P0 fail-closed correction in `WalActorContinuationGate`: both the gate
+dispatcher's initial `RuntimeQueue.isCurrent(context)` check and the
+deferred actor-turn second check previously returned silently when stale.
+This discarded a WAL result **without poisoning** a gate that might later
+be used for committed-state publication or an ACK. An expired actor
+activation is not proof that the underlying physical WAL append did not
+occur. The gate now poisons itself on either stale-generation check,
+refuses new registration and does not execute the unauthorizable callback.
+
+`WalActorContinuationGateTest` covers stale generation before dispatch,
+stale generation after scheduler enqueue, and rejection of subsequent
+registrations. The *new* stale-actor assertion was first run against
+the previous gate implementation and failed deliberately with
+`AssertionError: stale generation silently discarded sync evidence`.
+The corrected source and tests were then independently read back from
+GitHub and matched against locally executed Git blobs:
+- `WalActorContinuationGate.java`: `b3a12e76be3f77cddc05fd164d9beb462a995c84`
+- `WalActorContinuationGateTest.java`: `b089da66b24b9a304370f8b454de412a891a7158`.
+
+Local OpenJDK 21.0.12.1 compiled both unchanged GitHub files with
+`javac -Xlint:all -Werror` against **minimal host-only stand-ins**
+for their surrounding runtime types; **100/100 executions passed**
+the `HOST_WAL_ACTOR_CONTINUATION_GATE_PASS (not Oreslang guest)` oracle.
+This specifically validates the gate's local logic, **not** an exact-head
+six-suite build with the real runtime, the real actor admission system,
+a hosted source CI run or a database durability guarantee. The runtime
+must still use a bounded scheduler with fresh actor/isolate authority
+on every turn and separately fence the final durable ACK.
+
 ## Outstanding risks
 
 - Client code that blocks *all* 32 receipt handoffs waiting for operations
