@@ -1,0 +1,73 @@
+// Pure candidate index exercise: NOT an Oreslang DB or durable commit.
+import module wal_frame from "../../../src/wal/frame";
+import module db_candidate_index from "../../../src/shard/candidate_index";
+pub routine main(): void {
+  let mut index = db_candidate_index.new_candidate_index(7);
+  let List<int> key = new List<int>();
+  let List<int> value_a = new List<int>();
+  let List<int> value_b = new List<int>();
+  key.add(107); value_a.add(97); value_b.add(98);
+  if index.can_acknowledge() || index.candidate_get(key).is_ok(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  let first = wal_frame.encode(7, 3, 1, 100, 1, key, value_a);
+  let second = wal_frame.encode(7, 3, 2, 101, 1, key, value_b);
+  let del = wal_frame.encode(7, 4, 3, 102, 2, key, new List<int>());
+  let again = wal_frame.encode(7, 4, 4, 103, 1, key, value_a);
+  let List<int> absent = new List<int>();
+  absent.add(108);
+  let absent_delete = wal_frame.encode(7, 4, 5, 104, 2, absent, new List<int>());
+  if first.is_err() || second.is_err() || del.is_err() ||
+    again.is_err() || absent_delete.is_err(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  if index.apply_candidate(first.unwrap()).is_err(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  let got_first = index.candidate_get(key);
+  if got_first.is_err() || got_first.unwrap().get(0) != 97; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  // A caller must not be able to mutate the stored candidate via read alias.
+  let mut escaped = got_first.unwrap();
+  escaped.set(0, 99);
+  let got_again = index.candidate_get(key);
+  if got_again.is_err() || got_again.unwrap().get(0) != 97; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  if index.apply_candidate(second.unwrap()).is_err() ||
+    index.retained_value_bytes() != 1; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  let got_second = index.candidate_get(key);
+  if got_second.is_err() || got_second.unwrap().get(0) != 98; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  if index.apply_candidate(del.unwrap()).is_err() ||
+    index.candidate_get(key).is_ok() ||
+    index.retained_value_bytes() != 0; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  if index.apply_candidate(again.unwrap()).is_err() ||
+    index.apply_candidate(absent_delete.unwrap()).is_err() ||
+    index.last_record_sequence() != 5 ||
+    index.last_owner_generation() != 4 ||
+    index.accepted_records() != 5 ||
+    index.key_slot_count() != 1 ||
+    index.retained_value_bytes() != 1 ||
+    index.can_acknowledge(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  let final_value = index.candidate_get(key);
+  if final_value.is_err() || final_value.unwrap().get(0) != 97; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  index.close();
+  if !index.is_closed() || index.candidate_get(key).is_ok() ||
+    index.apply_candidate(again.unwrap()).is_ok() ||
+    index.can_acknowledge(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  stdio.stdout.write("db:candidate-index-lifecycle-ok");
+  return;
+}
