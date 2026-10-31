@@ -47,7 +47,7 @@ public final class ShardPublicationGateTest {
       var ctx=WalRuntimeGrant.issueContextFromTrustedRuntime(new WalFilePrimitive.Owner(7,11,5,3));
       var foreign=WalRuntimeGrant.issueContextFromTrustedRuntime(new WalFilePrimitive.Owner(7,11,5,3));
       final boolean[] active={true};
-      var grant=new WalRuntimeGrant(ctx,channel);
+      var grant=WalRuntimeGrant.attachPreopenedFromRuntime(channel,ctx);
       var shard=ShardPublicationGate.fromTrustedRuntime(ctx,grant,c->active[0]);
       byte[] key={107}, original={118}, nextValue={119};
       byte[] one=frame(7,3,1,101,1,key,original);
