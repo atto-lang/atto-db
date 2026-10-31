@@ -10,10 +10,11 @@ sh ci/verify-host-storage-grant.sh
 source=runtime/java/src/org/oreslang/db/primitive/WalFilePrimitive.java
 test=runtime/java/test/org/oreslang/db/primitive/WalHandoffLivenessTest.java
 bound_test=runtime/java/test/org/oreslang/db/primitive/WalHandoffSaturationTest.java
-sha256sum "$source" "$test" "$bound_test"
+emergency_test=runtime/java/test/org/oreslang/db/primitive/WalEmergencyQuiescenceTest.java
+sha256sum "$source" "$test" "$bound_test" "$emergency_test"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
-"$JAVAC_BIN" -Xlint:all -Werror -d "$tmp" "$source" "$test" "$bound_test"
+"$JAVAC_BIN" -Xlint:all -Werror -d "$tmp" "$source" "$test" "$bound_test" "$emergency_test"
 if ! timeout 35s "$JAVA_BIN" -cp "$tmp" \
     org.oreslang.db.primitive.WalHandoffLivenessTest >"$tmp/stdout" 2>"$tmp/stderr"; then
   echo 'HOST_WAL_HANDOFF_LIVENESS_FAIL: nonzero Java exit or timeout' >&2
@@ -36,6 +37,19 @@ fi
 printf '%s\n' 'HOST_WAL_HANDOFF_BOUND_PASS slots=32 (not Oreslang guest)' >"$tmp/expected"
 if ! cmp -s "$tmp/stdout" "$tmp/expected"; then
   echo 'HOST_WAL_HANDOFF_BOUND_FAIL: stdout mismatch' >&2
+  cat "$tmp/stdout" "$tmp/stderr" >&2
+  exit 1
+fi
+cat "$tmp/stdout"
+if ! timeout 35s "$JAVA_BIN" -cp "$tmp" \
+    org.oreslang.db.primitive.WalEmergencyQuiescenceTest >"$tmp/stdout" 2>"$tmp/stderr"; then
+  echo 'HOST_WAL_EMERGENCY_QUIESCENCE_FAIL: nonzero Java exit or timeout' >&2
+  cat "$tmp/stderr" >&2
+  exit 1
+fi
+printf '%s\n' 'HOST_WAL_EMERGENCY_QUIESCENCE_PASS (not Oreslang guest)' >"$tmp/expected"
+if ! cmp -s "$tmp/stdout" "$tmp/expected"; then
+  echo 'HOST_WAL_EMERGENCY_QUIESCENCE_FAIL: stdout mismatch' >&2
   cat "$tmp/stdout" "$tmp/stderr" >&2
   exit 1
 fi
