@@ -53,7 +53,7 @@ jobs:
             runtime/java/test/org/oreslang/db/primitive/WalHandoffLivenessTest.java \
             runtime/java/test/org/oreslang/db/primitive/WalHandoffSaturationTest.java \
             runtime/java/test/org/oreslang/db/primitive/WalEmergencyQuiescenceTest.java
-      - name: Execute all four independent Java host regressions
+      - name: Execute five independent Java host regressions
         shell: bash
         run: |
           set -euo pipefail
