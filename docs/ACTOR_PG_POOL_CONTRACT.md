@@ -1,6 +1,6 @@
 # Oreslang actor-shared PostgreSQL: security and performance contract
 
-Status: **design contract plus bounded-limit Java host fixture**, not a production guest driver. A separate locally tested, larger host-reference prototype is not yet part of this branch. No native async PostgreSQL protocol, AOT, LLVM, or GraalVM guest execution is claimed.
+Status: **design contract plus Java 21 JDBC host-reference prototype on this draft PR**, not a production guest driver. Fake-DataSource tests are not PostgreSQL execution evidence; the disposable PostgreSQL 17 integration and native guest/backend execution remain unverified until runnable jobs produce exact-head evidence. No native async PostgreSQL protocol, AOT, LLVM, or GraalVM guest execution is claimed.
 
 ## Ownership and authority
 - A runtime-owned pool belongs to exactly one database credential/role and trust domain.
