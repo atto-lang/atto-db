@@ -94,6 +94,37 @@ public final class WalActorContinuationGateTest {
       check(action != null, "missing mailbox action");
       action.run();
       check(called.get() == 0, "stale actor callback was executed");
+      check(gate.isPoisoned(), "stale generation silently discarded sync evidence");
+    }
+  }
+
+  private static void staleBeforeDispatchPoisons() throws Exception {
+    CountDownLatch inspected = new CountDownLatch(1);
+    AtomicInteger dispatched = new AtomicInteger();
+    AtomicInteger called = new AtomicInteger();
+    var stale = new WalActorContinuationGate.RuntimeQueue() {
+      public boolean isCurrent(WalRuntimeGrant.Context ctx) {
+        inspected.countDown();
+        return false;
+      }
+      public void dispatch(WalRuntimeGrant.Context ctx, Runnable task) {
+        dispatched.incrementAndGet();
+      }
+    };
+    try (WalActorContinuationGate gate =
+           WalActorContinuationGate.fromTrustedRuntime(CONTEXT, stale)) {
+      gate.register(CONTEXT, CompletableFuture.completedFuture(12),
+          (v, e) -> called.incrementAndGet());
+      waitFor(inspected, "stale generation predispatch check never happened");
+      for (int i = 0; i < 200 && !gate.isPoisoned(); ++i)
+        Thread.sleep(5);
+      check(gate.isPoisoned(), "predispatch stale generation left gate healthy");
+      check(dispatched.get() == 0 && called.get() == 0,
+            "stale predispatch receipt escaped into runtime");
+      try {
+        gate.register(CONTEXT, CompletableFuture.completedFuture(1), (v, e) -> {});
+        throw new AssertionError("poisoned stale gate accepted a new receipt");
+      } catch (RejectedExecutionException expected) { }
     }
   }
 
@@ -185,6 +216,75 @@ public final class WalActorContinuationGateTest {
     }
   }
 
+  private static void deferredActorFailurePoisons() throws Exception {
+    // The first freshness check runs on the gate's bridge thread and passes.
+    // The second executes later on the actor and raises Error. The bridge
+    // cannot catch it: the wrapped actor task must poison the gate itself.
+    LinkedBlockingQueue<Runnable> mailbox = new LinkedBlockingQueue<>();
+    CountDownLatch queued = new CountDownLatch(1);
+    AtomicInteger checks = new AtomicInteger();
+    var runtime = new WalActorContinuationGate.RuntimeQueue() {
+      public boolean isCurrent(WalRuntimeGrant.Context context) {
+        if (checks.incrementAndGet() == 1) return true;
+        throw new AssertionError("actor activation retired during mailbox execution");
+      }
+      public void dispatch(WalRuntimeGrant.Context context, Runnable task) {
+        mailbox.add(task);
+        queued.countDown();
+      }
+    };
+    try (WalActorContinuationGate gate =
+           WalActorContinuationGate.fromTrustedRuntime(CONTEXT, runtime)) {
+      gate.register(CONTEXT, CompletableFuture.completedFuture(6), (v, e) -> {
+        throw new AssertionError("stale guest callback was executed");
+      });
+      waitFor(queued, "deferred actor task missing");
+      Runnable action = mailbox.poll(5, TimeUnit.SECONDS);
+      check(action != null, "no deferred task");
+      try {
+        action.run();
+        throw new AssertionError("deferred isCurrent error was suppressed");
+      } catch (AssertionError expected) {
+        check(expected.getMessage().contains("actor activation retired"),
+              "wrong actor error");
+      }
+      check(gate.isPoisoned(), "deferred activation failure left gate healthy");
+    }
+
+    // A guest callback that fails after successful admission also poisons
+    // the gate. No subsequent receipt may be turned into a durable ACK.
+    LinkedBlockingQueue<Runnable> callbacks = new LinkedBlockingQueue<>();
+    CountDownLatch emitted = new CountDownLatch(1);
+    var runtime2 = new WalActorContinuationGate.RuntimeQueue() {
+      public boolean isCurrent(WalRuntimeGrant.Context context) { return true; }
+      public void dispatch(WalRuntimeGrant.Context context, Runnable task) {
+        callbacks.add(task);
+        emitted.countDown();
+      }
+    };
+    try (WalActorContinuationGate gate =
+           WalActorContinuationGate.fromTrustedRuntime(CONTEXT, runtime2)) {
+      gate.register(CONTEXT, CompletableFuture.completedFuture(7), (v, e) -> {
+        throw new AssertionError("injected actor callback failure");
+      });
+      waitFor(emitted, "actor callback task missing");
+      Runnable action = callbacks.poll(5, TimeUnit.SECONDS);
+      check(action != null, "no actor callback task");
+      try {
+        action.run();
+        throw new AssertionError("actor callback failure swallowed");
+      } catch (AssertionError expected) {
+        check(expected.getMessage().contains("injected actor callback"),
+              "wrong callback error");
+      }
+      check(gate.isPoisoned(), "failed actor callback left gate healthy");
+      try {
+        gate.register(CONTEXT, CompletableFuture.completedFuture(8), (v, e) -> {});
+        throw new AssertionError("gate admitted callback after actor failure");
+      } catch (RejectedExecutionException expected) { }
+    }
+  }
+
   private static void boundedQueuePoisons() throws Exception {
     CountDownLatch occupied = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
@@ -225,9 +325,11 @@ public final class WalActorContinuationGateTest {
   public static void main(String[] args) throws Exception {
     earlyAndLate();
     staleDeliveryFailsClosed();
+    staleBeforeDispatchPoisons();
     rejectedRuntimePoisons();
     callerRunsRejected();
     uncheckedRuntimeErrorPoisons();
+    deferredActorFailurePoisons();
     boundedQueuePoisons();
     System.out.println("HOST_WAL_ACTOR_CONTINUATION_GATE_PASS (not Oreslang guest)");
   }

@@ -85,7 +85,13 @@ final class WalActorContinuationGate implements AutoCloseable {
       // whenComplete can be inline for a completed stage. Only a bounded offer
       // happens here, never guest callback, scheduler admission, or blocking I/O.
       Runnable notice = () -> {
-        if (retired || poisoned || !runtime.isCurrent(context)) return;
+        if (retired || poisoned) return;
+        // A stale generation makes a pending receipt unauthorizable. Leaving
+        // the gate healthy here can incorrectly permit a later DB ACK.
+        if (!runtime.isCurrent(context)) {
+          poisoned = true;
+          return;
+        }
         runtime.dispatch(context, () -> {
           // Reject a broken CallerRuns-style scheduler rather than executing
           // actor code on this handoff worker. The real runtime must also
@@ -95,8 +101,20 @@ final class WalActorContinuationGate implements AutoCloseable {
             return;
           }
           // Recheck at actual actor turn execution, not just dispatch.
-          if (!retired && !poisoned && runtime.isCurrent(context))
+          // Errors from this LATER actor turn are outside the gate dispatcher
+          // and must independently poison the gate rather than silently
+          // losing an authenticated receipt during actor scheduling.
+          try {
+            if (retired || poisoned) return;
+            if (!runtime.isCurrent(context)) {
+              poisoned = true;
+              return;
+            }
             continuation.accept(value, error);
+          } catch (RuntimeException | Error actorFailure) {
+            poisoned = true;
+            throw actorFailure;
+          }
         });
       };
       if (!retired && !poisoned && !pending.offer(notice)) poisoned = true;
