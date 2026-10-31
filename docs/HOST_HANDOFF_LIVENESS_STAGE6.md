@@ -92,6 +92,35 @@ previous source head. The source org's zero-step Actions admission failures
 are not test evidence. Private alternate-runner execution requires independent
 approval for its *new* source tree and access scope before any source transfer.
 
+### Late subscribers on a completed CompletionStage: caller-carrier hazard
+
+**P0 runtime integration rule:** returning `CompletableFuture.minimalCompletionStage()`
+does **not** ensure callbacks run on the receipt handoff virtual thread.
+If a caller registers synchronous `thenApply`, `handle`, or `whenComplete`
+**after** that stage completed, Java 21 can execute the callback *inline on
+the registering thread*. The host primitive's 32-slot callback bound only
+covers callbacks invoked during the owned completion, not arbitrary late
+continuations attached after the slot is released. Consequently, an actor
+carrier registering a late blocking callback can block itself: the source
+comment "no task runs on a caller/actor carrier" is not a blanket guarantee.
+
+Independently executed a source-free OpenJDK 21 probe using the **same JDK
+`minimalCompletionStage()` operation**: a completed stage's subsequent
+`thenApply` ran on `main`, while `thenApplyAsync` with a dedicated
+virtual-thread executor ran off that thread. This is *JDK behavior evidence*,
+not execution of Oreslang DB's current source or a guest-side integration.
+
+**Required before guest exposure:** never expose the raw Java completion
+stage as an actor-facing suspension contract. The trusted runtime must
+register each guest continuation onto a runtime-owned, bounded, authorized
+scheduler (never a blocking actor carrier), check tenant/actor generation
+at dispatch and immediately before any durable ACK, and handle registration
+both before and after completion plus cancellation/shutdown. Using the
+unqualified common-pool `thenApplyAsync` is not sufficient tenant authority.
+A native guest test must cover both early and late callback registration.
+This remains a non-waivable P0, not a reason to count source-free Java tests
+as Oreslang guest proof.
+
 ## Outstanding risks
 
 - Client code that blocks *all* 32 receipt handoffs waiting for operations
