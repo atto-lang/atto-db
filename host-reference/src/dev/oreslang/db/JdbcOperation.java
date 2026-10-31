@@ -6,6 +6,7 @@ final class JdbcOperation {
     static ActorPgPool.Outcome execute(Connection connection, ActorPgPool.Template template, String tenant, List<Object> arguments, int maxRows, int maxResultBytes) throws SQLException {
         connection.setReadOnly(template.readOnly());
         connection.setAutoCommit(false);
+        boolean committed = false;
         try {
             try (PreparedStatement context = connection.prepareStatement("SELECT set_config('ores.tenant_id', ?, true)")) {
                 context.setString(1, tenant);
@@ -43,13 +44,17 @@ final class JdbcOperation {
                 } else result = new ActorPgPool.Outcome(p.getUpdateCount(), List.of());
             }
             connection.commit();
+            committed = true;
             return result;
         } catch (Exception error) {
             try { connection.rollback(); } catch (SQLException rollbackError) { error.addSuppressed(rollbackError); }
             if (error instanceof SQLException sql) throw sql;
             throw new SQLException("database result rejected", error);
         } finally {
-            connection.setAutoCommit(true);
+            // JDBC setAutoCommit(true) can commit a pending transaction.
+            // Failed execution, COMMIT, or ROLLBACK means the owner must discard
+            // this connection, not silently commit uncertain changes.
+            if (committed) connection.setAutoCommit(true);
         }
     }
     private static int valueSize(Object v) {
