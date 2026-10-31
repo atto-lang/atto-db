@@ -66,7 +66,9 @@ final class ShardPublicationGate {
   private final Map<ByteKey, byte[]> values = new HashMap<>();
   private final Set<ByteKey> historicalKeys = new HashSet<>();
   private final Set<Integer> operationIds = new HashSet<>();
-  private Phase phase = Phase.OPEN;
+  // Only this diagnostic phase is read from non-actor threads. All index
+  // mutations remain confined to a serialized trusted actor turn.
+  private volatile Phase phase = Phase.OPEN;
   private Pending pending;
   private int sequence;
   private int lastGeneration;
