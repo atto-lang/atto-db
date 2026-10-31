@@ -7,6 +7,7 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
 import java.util.Arrays;
 
 /** Independent golden bytes + real read-only FileChannel, no mock I/O. */
@@ -76,6 +77,8 @@ public final class ReadOnlyWalReplayTest {
     var empty = inspect(wal, new byte[0]);
     check(empty.records().isEmpty() && empty.lastSequence() == 0 && empty.bytesChecked() == 0,
           "new empty log");
+    check(Arrays.equals(empty.snapshotSha256(), MessageDigest.getInstance("SHA-256").digest()),
+          "empty log has standard SHA-256 fingerprint");
     byte[] first = put(3, 1, 42);
     byte[] golden = new byte[] {79,68,66,49,1,1,7,0,0,0,3,0,0,0,1,0,0,0,42,0,0,0,
         1,0,1,0,107,118,33,2,112,31};
@@ -84,6 +87,14 @@ public final class ReadOnlyWalReplayTest {
     var scan = inspect(wal, both);
     check(scan.bytesChecked() == both.length && scan.records().size() == 2,
           "whole-file snapshot and both records");
+    check(Arrays.equals(scan.snapshotSha256(),
+          MessageDigest.getInstance("SHA-256").digest(both)),
+          "snapshot SHA-256 binds exact read bytes");
+    byte[] mutatedDigest = scan.snapshotSha256();
+    mutatedDigest[0] ^= 1;
+    check(!Arrays.equals(mutatedDigest, scan.snapshotSha256()),
+          "snapshot digest getter is a defensive copy");
+    check(scan.snapshotSha256().length == 32, "snapshot digest length");
     check(scan.lastSequence() == 2 && scan.lastGeneration() == 4,
           "ordered replay across activation generation");
     check(scan.records().get(0).kind() == 1 && scan.records().get(1).kind() == 2,
@@ -101,6 +112,11 @@ public final class ReadOnlyWalReplayTest {
     check(immutable, "unmodifiable result list");
     check(Arrays.equals(Files.readAllBytes(wal), both), "inspection never writes");
     try (FileChannel ch = FileChannel.open(wal, StandardOpenOption.READ)) {
+      ch.position(7);
+      var positional = ReadOnlyWalReplay.inspectPreopened(ch, 7);
+      check(ch.position() == 7, "read-only inspection leaves descriptor cursor unchanged");
+      check(Arrays.equals(positional.snapshotSha256(), scan.snapshotSha256()),
+            "positional read fingerprint unaffected by descriptor cursor");
       boolean denied = false;
       try { ReadOnlyWalReplay.inspectPreopened(ch, 0); }
       catch (IllegalArgumentException expected) { denied = true; }
@@ -154,6 +170,9 @@ public final class ReadOnlyWalReplayTest {
     var max = frame(7, 3, 1, 42, 1, new byte[64], new byte[1024]);
     check(max.length == 1118 && inspect(wal, max).records().size() == 1,
           "largest valid frame is accepted");
+    check(!Arrays.equals(inspect(wal, max).snapshotSha256(),
+          MessageDigest.getInstance("SHA-256").digest(put(3, 1, 42))),
+          "different valid WAL byte streams have distinct test digests");
   }
 
   public static void main(String[] args) throws Exception {

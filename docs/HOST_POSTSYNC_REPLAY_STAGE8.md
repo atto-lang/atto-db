@@ -18,3 +18,7 @@ This test is NOT using `WalFilePrimitive` or `WalRuntimeGrant`; it directly invo
 - Source-local pull-request workflow uses pinned checkout and Temurin 21, compares exact PR head and both source Git blobs. Any GitHub runner with zero executed steps is an admission failure, not a host test result.
 - Do not mirror this private tree across organizations without an independent explicit approval of the exact tree/destination/retention policy. No secrets or external checkout tokens.
 - Keep PR draft. Next P0 is an authenticated runtime-issued WAL authority, guest `.ores` execution and SIGKILL-after-sync-before-ACK recovery driven by the **real Oreslang actor** with persistent idempotency.
+
+## 2026-10-31 upstream reconciliation
+
+Source blob is now the updated stage-7 read-only verifier SHA `8da48ec37b5a2ab8cb141c2403669fce6ffb6024`, which adds a defensively-copied snapshot SHA-256 fingerprint. Exact-blob recheck plus local OpenJDK 21 `-Xlint:all -Werror` compile and 3/3 independent stage-8 process-kill/replay runs passed against the updated **actual** scanner blob. No Oreslang guest or durable ACK claim. PR #16 is carried onto the upstream stage-7 Git tree using a two-parent non-force merge commit, preserving the original stage-8 history.

@@ -47,5 +47,5 @@ jobs:
           timeout 45s java -cp "$RUNNER_TEMP/ores-db-replay" \
             org.oreslang.db.primitive.ReadOnlyWalReplayTest > "$RUNNER_TEMP/replay.txt"
           test "$(cat "$RUNNER_TEMP/replay.txt")" = \
-            'HOST_WAL_READONLY_REPLAY_PASS checks=60 (read-only diagnostic; not guest, lease, truncation, commit or crash proof)'
+            'HOST_WAL_READONLY_REPLAY_PASS checks=67 (read-only diagnostic; not guest, lease, truncation, commit or crash proof)'
           cat "$RUNNER_TEMP/replay.txt"

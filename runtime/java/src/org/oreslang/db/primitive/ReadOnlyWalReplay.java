@@ -3,6 +3,8 @@ package org.oreslang.db.primitive;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -62,11 +64,18 @@ final class ReadOnlyWalReplay {
   }
 
   /** A verified *candidate record stream*, NOT a durable/recovered index. */
+  /**
+   * SHA-256 is only an exact-byte fingerprint of this read snapshot.
+   * It is NOT proof of exclusive lease, storage durability or authenticity.
+   * Defensively copied: callers cannot mutate the retained fingerprint.
+   */
   record Inspection(List<Record> records, long bytesChecked,
-                    int lastSequence, int lastGeneration) {
+                    int lastSequence, int lastGeneration, byte[] snapshotSha256) {
     Inspection {
       records = List.copyOf(records);
+      snapshotSha256 = snapshotSha256.clone();
     }
+    @Override public byte[] snapshotSha256() { return snapshotSha256.clone(); }
   }
 
   private ReadOnlyWalReplay() { }
@@ -149,7 +158,13 @@ final class ReadOnlyWalReplay {
       at += frameLength;
     }
     if (channel.size() != size) throw new InvalidWal("wal_changed_during_scan", at);
-    return new Inspection(candidate, size, lastSequence, lastGeneration);
+    return new Inspection(candidate, size, lastSequence, lastGeneration,
+        sha256(bytes));
+  }
+
+  private static byte[] sha256(byte[] data) {
+    try { return MessageDigest.getInstance("SHA-256").digest(data); }
+    catch (NoSuchAlgorithmException unavailable) { throw new AssertionError(unavailable); }
   }
 
   private static int u8(byte[] bytes, int offset) { return bytes[offset] & 255; }

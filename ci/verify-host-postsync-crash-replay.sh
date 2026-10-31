@@ -24,7 +24,7 @@ test "$(pwd -P)" = "$(git rev-parse --show-toplevel)"
 test -z "$(git status --porcelain)"
 test "$(git rev-parse HEAD)" = "$DB_EXPECTED_COMMIT"
 test "$(git rev-parse 'HEAD^{tree}')" = "$DB_EXPECTED_TREE"
-test "$(git hash-object runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java)" = a0db92f5c916590d79c9e0e7d087d29e9e081f5a
+test "$(git hash-object runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java)" = 8da48ec37b5a2ab8cb141c2403669fce6ffb6024
 test "$(git hash-object runtime/java/test/org/oreslang/db/primitive/WalPostSyncCrashReplayTest.java)" = 193e949ad54be5911c324f1c79a0d1252b309984
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
