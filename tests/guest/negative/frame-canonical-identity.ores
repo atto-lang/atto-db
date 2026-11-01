@@ -1,0 +1,47 @@
+// ODB1 invalid canonical identity and length fields with a recomputed checksum.
+// The structural decoder must reject each complete, checksum-valid forgery.
+// Exact stdout: db:wal-canonical-header-ok. No storage or durability proof.
+import module wal_frame from "../../../src/wal/frame";
+pub routine main(): void {
+  let List<int> key = new List<int>();
+  let List<int> value = new List<int>();
+  key.add(107); value.add(118);
+  val encoded = wal_frame.encode(7, 3, 1, 42, 1, key, value);
+  if encoded.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val wire = encoded.unwrap();
+  if wire.length != 32 || wal_frame.decode(wire).is_err(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+
+  // Zero each u32 identity independently, empty key, then value_len=1025.
+  // Recompute the entire Adler32 trailer to avoid checksum-only rejection.
+  for (let attempt = 0; attempt < 6; attempt++) {
+    let List<int> forged = new List<int>();
+    for (const octet of wire) { forged.add(octet); }
+    if attempt < 4; then
+      let int at = 6 + attempt * 4;
+      for (let j = 0; j < 4; j++) { forged.set(at + j, 0); }
+    fi
+    if attempt == 4; then forged.set(22, 0); fi
+    if attempt == 5; then
+      forged.set(24, 1); forged.set(25, 4);
+    fi
+    let int a = 1;
+    let int b = 0;
+    for (let i = 0; i < 28; i++) {
+      a = a + forged.get(i);
+      if a >= 65521; then a = a - 65521; fi
+      b = b + a;
+      if b >= 65521; then b = b - 65521; fi
+    }
+    forged.set(28, a - (a / 256) * 256);
+    forged.set(29, a / 256);
+    forged.set(30, b - (b / 256) * 256);
+    forged.set(31, b / 256);
+    if !wal_frame.decode(forged).is_err(); then
+      stdio.stdout.write("db:FAILED"); return;
+    fi
+  }
+  stdio.stdout.write("db:wal-canonical-header-ok");
+  return;
+}
