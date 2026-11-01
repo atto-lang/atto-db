@@ -10,7 +10,6 @@ trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 commit=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 tree=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 digest=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-sha=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
 cat > "$tmp/fixtures" <<'FIXTURES'
 tests/guest/positive/frame-roundtrip.ores
 tests/guest/negative/frame-rejections.ores
@@ -31,7 +30,8 @@ FIXTURES
 {
   printf 'SOURCE_COMMIT=%s\nSOURCE_TREE=%s\nCOMPILER_BINARY_SHA256=%s\n' "$commit" "$tree" "$digest"
   while IFS= read -r f; do
-    printf 'FIXTURE_SHA256=%s  %s\n' "$sha" "$f"
+    expected_hash="$(sha256sum "$root/$f" | cut -d ' ' -f1)"
+    printf 'FIXTURE_SHA256=%s  %s\n' "$expected_hash" "$f"
     printf 'GUEST_EXECUTED_PASS %s\n' "$f"
   done < "$tmp/fixtures"
   printf '%s\n' 'GUEST_WAL_CODEC_ONLY_PASS cases=15; NO AUTHENTICATION, NO DURABILITY CLAIM'
@@ -66,15 +66,14 @@ printf '%s\n' 'GUEST_WAL_CODEC_ONLY_PASS cases=15; NO AUTHENTICATION, NO DURABIL
 cp "$tmp/valid" "$tmp/bad"; tail -n 1 "$tmp/valid" >> "$tmp/bad"; must_reject
 sed '$d' "$tmp/valid" > "$tmp/bad"; must_reject
 { sed '$d' "$tmp/valid"; printf '%s\n' 'GUEST_WAL_CODEC_ONLY_PASS cases=15; NO AUTHENTICATION, NO DURABILITY CLAIM'; printf 'forged-final-line\n'; } > "$tmp/bad"; must_reject
-# Wrong fixture digest and truncated sha256sum record.
-sed "s@FIXTURE_SHA256=$sha@FIXTURE_SHA256=00000000${sha#dddddddd}@" "$tmp/valid" > "$tmp/bad"; 
-# Changing checksum to another valid hex value cannot be detected from output alone;
-# provenance is established by the native verifier and source checkout, not this helper.
-cp "$tmp/valid" "$tmp/bad"; sed -i 's@FIXTURE_SHA256=dddddddd@FIXTURE_SHA256=zzzzzzzz@' "$tmp/bad"; must_reject
-cp "$tmp/valid" "$tmp/bad"; sed -i 's@FIXTURE_SHA256=dddddddd@FIXTURE_SHA256=ddddddd@' "$tmp/bad"; must_reject
+# Correctly shaped but incorrect fixture hash must be rejected even though
+# it is 64 lowercase hex characters.
+sed '0,/^FIXTURE_SHA256=/s/^FIXTURE_SHA256=[0-9a-f]\{64\}/FIXTURE_SHA256=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee/' "$tmp/valid" > "$tmp/bad"; must_reject
+cp "$tmp/valid" "$tmp/bad"; sed -i 's/^FIXTURE_SHA256=[0-9a-f]/FIXTURE_SHA256=z/' "$tmp/bad"; must_reject
+cp "$tmp/valid" "$tmp/bad"; sed -i 's/^FIXTURE_SHA256=[0-9a-f]\{64\}/FIXTURE_SHA256=ddddddd/' "$tmp/bad"; must_reject
 # Out-of-order fixture announcement and duplicate file-hash rows.
 awk '/^FIXTURE_SHA256=/ && !once++ {print; print; next} {print}' "$tmp/valid" > "$tmp/bad"; must_reject
-sed 's@FIXTURE_SHA256=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd  tests/guest/positive/frame-roundtrip.ores@FIXTURE_SHA256=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd  tests/guest/positive/forged.ores@' "$tmp/valid" > "$tmp/bad"; must_reject
+sed '0,/tests\/guest\/positive\/frame-roundtrip.ores/s@tests/guest/positive/frame-roundtrip.ores@tests/guest/positive/forged.ores@' "$tmp/valid" > "$tmp/bad"; must_reject
 # Any trailing log lines after a terminal success are rejected.
 cp "$tmp/valid" "$tmp/bad"; printf 'unexpected-tail\n' >> "$tmp/bad"; must_reject
 # Excessively large child output should not be trusted or scanned indefinitely.
