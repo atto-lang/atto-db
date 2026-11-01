@@ -42,6 +42,9 @@ check_source_checkout() {
   }
 }
 seen_digests=''
+seen_source_roots='|'
+receipt_dir="$(mktemp -d)"
+trap 'rm -rf "$receipt_dir"' EXIT HUP INT TERM
 for phase in preflight execute; do
   for backend in java llvm wasm cranelift dotnet; do
     case "$backend" in
@@ -72,6 +75,13 @@ for phase in preflight execute; do
     }
     check_source_checkout "$source_root" "$source_commit" "$source_tree" "$backend"
     if [ "$phase" = preflight ]; then
+      # Five independently attested backends cannot share one physical
+      # source checkout even if the wrappers/binary digests differ.
+      case "$physical" in *'|'* ) echo "BACKEND_SOURCE_PATH_INVALID $backend" >&2; exit 2 ;; esac
+      case "$seen_source_roots" in
+        *"|$physical|"*) echo "BACKEND_SOURCE_ROOT_REUSED $backend" >&2; exit 2 ;;
+      esac
+      seen_source_roots="$seen_source_roots$physical|"
       case " $seen_digests " in
         *" $digest "*) echo "BACKEND_BINARY_REUSED $backend" >&2; exit 2 ;;
       esac
@@ -79,8 +89,19 @@ for phase in preflight execute; do
     fi
     if [ "$phase" = execute ]; then
       echo "BACKEND_ATTEMPT=$backend"
-      ORESLANG_BIN="$bin" ORESLANG_COMPILER_SHA256="$digest" \
-        sh ci/verify-native-wal.sh
+      receipt_log="$receipt_dir/$backend.log"
+      if ! ORESLANG_BIN="$bin" ORESLANG_COMPILER_SHA256="$digest" \
+        sh ci/verify-native-wal.sh > "$receipt_log"; then
+        cat "$receipt_log" >&2
+        echo "BACKEND_GUEST_EXECUTION_FAILED $backend" >&2
+        exit 1
+      fi
+      if ! sh ci/assert-native-wal-receipts.sh "$receipt_log" \
+          "$DB_EXPECTED_COMMIT" "$DB_EXPECTED_TREE" "$digest"; then
+        echo "BACKEND_GUEST_RECEIPTS_INVALID $backend" >&2
+        exit 1
+      fi
+      cat "$receipt_log"
       echo "BACKEND_GUEST_CODEC_PASS=$backend cases=15"
     fi
   done
