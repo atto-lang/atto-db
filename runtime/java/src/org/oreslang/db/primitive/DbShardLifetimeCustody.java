@@ -103,6 +103,34 @@ final class DbShardLifetimeCustody {
       }
     }
 
+    /**
+     * Off-actor, fully verified ODB1 evidence; never exposes descriptor or
+     * write authority. Cross-check under the retained THREE OS leases.
+     */
+    /** Reject synchronous evidence I/O on actor carriers without DoSing a live lease. */
+    void requireOffActorTurnForEvidence() { checkOffActorTurn(); }
+
+    ReadOnlyWalReplay.Inspection inspectVerifiedWalOffActorTurn() throws IOException {
+      checkOffActorTurn();
+      synchronized (mutex) {
+        Diagnostic verified = verifyOffActorTurn();
+        try {
+          var snapshot = ReadOnlyWalReplay.inspectPreopened(wal,key.tenant());
+          if (snapshot.bytesChecked() != verified.walEndOffset() ||
+              !Arrays.equals(snapshot.snapshotSha256(),verified.walSha256()) ||
+              snapshot.lastSequence() != verified.lastSequence() ||
+              snapshot.lastGeneration() != verified.walGeneration()) {
+            revoked = true;
+            throw new SecurityException("verified WAL changed during operation evidence read");
+          }
+          return snapshot;
+        } catch (IOException | RuntimeException | Error failure) {
+          revoked = true;
+          throw failure;
+        }
+      }
+    }
+
     private boolean locksHeld() {
       return wal.isOpen() && a.isOpen() && b.isOpen() &&
           walLock.isValid() && aLock.isValid() && bLock.isValid() &&
