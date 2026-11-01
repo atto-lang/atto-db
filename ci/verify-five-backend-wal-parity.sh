@@ -42,7 +42,7 @@ check_source_checkout() {
   }
 }
 seen_digests=''
-for phase in preflight execute; do
+for phase in preflight execute final; do
   for backend in java llvm wasm cranelift dotnet; do
     case "$backend" in
       java) bin="${DB_JAVA_COMPILER_BIN:-}"; digest="${DB_JAVA_COMPILER_SHA256:-}"
@@ -80,10 +80,25 @@ for phase in preflight execute; do
     if [ "$phase" = execute ]; then
       echo "BACKEND_ATTEMPT=$backend"
       ORESLANG_BIN="$bin" ORESLANG_COMPILER_SHA256="$digest" \
-        sh ci/verify-native-wal.sh
+        ORESLANG_BACKEND="$backend" sh ci/verify-native-wal.sh
       echo "BACKEND_GUEST_CODEC_PASS=$backend cases=15"
     fi
   done
   if [ "$phase" = preflight ]; then echo 'FIVE_BACKEND_PREFLIGHT_PASS; NO GUEST EXECUTION YET'; fi
+  if [ "$phase" = final ]; then
+    # Guest launchers may accidentally rewrite a tracked fixture, alter a
+    # compiler binary, or mutate a backend source checkout during execution.
+    # This final pass catches changes even after the last backend returns.
+    test -z "$(git status --porcelain)" || {
+      echo 'DB_SOURCE_CHANGED_DURING_GUEST_RUN' >&2; exit 2;
+    }
+    test "$(git rev-parse HEAD)" = "$DB_EXPECTED_COMMIT" || {
+      echo 'DB_SOURCE_COMMIT_CHANGED_DURING_GUEST_RUN' >&2; exit 2;
+    }
+    test "$(git rev-parse 'HEAD^{tree}')" = "$DB_EXPECTED_TREE" || {
+      echo 'DB_SOURCE_TREE_CHANGED_DURING_GUEST_RUN' >&2; exit 2;
+    }
+    echo 'FIVE_BACKEND_FINAL_SOURCE_AND_BINARY_RECHECK_PASS; NOT COMPILER ATTESTATION'
+  fi
 done
 echo 'FIVE_BACKEND_ODB1_EXECUTION_CANDIDATE_PASS cases=75; NO AUTHENTICATION OR DURABILITY CLAIM'

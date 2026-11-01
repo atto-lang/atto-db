@@ -10,7 +10,29 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 mkdir -p "$tmp/repo/ci" "$tmp/compilers"
 cp "$root/ci/verify-five-backend-wal-parity.sh" "$tmp/repo/ci/"
-printf '%s\n' '#!/bin/sh' 'set -eu' 'echo MOCK_WAL_GATE_ONLY' > "$tmp/repo/ci/verify-native-wal.sh"
+cat > "$tmp/repo/ci/verify-native-wal.sh" <<'MOCK_GATE'
+#!/bin/sh
+# Test-only fake verifier. Never count its output as compiled Oreslang.
+set -eu
+case "${ORESLANG_BACKEND:-}" in
+  java|llvm|wasm|cranelift|dotnet) ;;
+  *) echo 'MOCK_BACKEND_NOT_PASSED' >&2; exit 45 ;;
+esac
+if [ "${MOCK_FAIL_BACKEND:-}" = "$ORESLANG_BACKEND" ]; then
+  echo "MOCK_GUEST_FAILED_BACKEND=$ORESLANG_BACKEND" >&2
+  exit 17
+fi
+if [ "${MOCK_MUTATE_DB_BACKEND:-}" = "$ORESLANG_BACKEND" ]; then
+  printf 'unexpected guest output\n' > "${MOCK_DB_ROOT:?}/guest-mutated-repo"
+fi
+if [ "${MOCK_MUTATE_SOURCE_BACKEND:-}" = "$ORESLANG_BACKEND" ]; then
+  printf 'unexpected compiler output\n' > "${MOCK_SOURCE_ROOT:?}/guest-mutated-backend"
+fi
+if [ "${MOCK_MUTATE_BIN_BACKEND:-}" = "$ORESLANG_BACKEND" ]; then
+  printf '# unexpected binary rewrite\n' >> "${MOCK_COMPILER_BIN:?}"
+fi
+echo MOCK_WAL_GATE_ONLY
+MOCK_GATE
 for backend in java llvm wasm cranelift dotnet; do
   printf '#!/bin/sh\necho MOCK_%s\n' "$backend" > "$tmp/compilers/$backend"
   chmod 700 "$tmp/compilers/$backend"
@@ -82,4 +104,29 @@ printf 'dirty\n' > "$tmp/sources/wasm/untracked"
 assert_preflight_failure env
 rm "$tmp/sources/wasm/untracked"
 assert_preflight_failure env DB_CRANELIFT_SOURCE_TREE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-echo 'HOST_PARITY_COORDINATOR_CONTRACT_PASS cases=14; MOCK EXECUTABLES ONLY; NO NATIVE GUEST EXECUTIONS'
+# A failed actual guest must reject the entire matrix, including when the
+# final backend fails after four other mocked backends emitted their markers.
+assert_execute_failure() {
+  if (cd "$tmp/repo" && "$@" sh ci/verify-five-backend-wal-parity.sh) > "$tmp/out" 2> "$tmp/err"; then
+    echo 'FAILED: guest execution or post-execution mutation was credited' >&2
+    exit 1
+  fi
+  if grep -q '^FIVE_BACKEND_ODB1_EXECUTION_CANDIDATE_PASS' "$tmp/out"; then
+    echo 'FAILED: global success marker present despite guest failure' >&2
+    exit 1
+  fi
+}
+for backend in java llvm wasm cranelift dotnet; do
+  assert_execute_failure env MOCK_FAIL_BACKEND="$backend"
+done
+# The most important time-of-check/use case: the final guest exits 0 but
+# dirties the DB source, backend source or compiler binary after preflight.
+assert_execute_failure env MOCK_MUTATE_DB_BACKEND=dotnet MOCK_DB_ROOT="$tmp/repo"
+rm "$tmp/repo/guest-mutated-repo"
+assert_execute_failure env MOCK_MUTATE_SOURCE_BACKEND=dotnet MOCK_SOURCE_ROOT="$tmp/sources/dotnet"
+rm "$tmp/sources/dotnet/guest-mutated-backend"
+assert_execute_failure env MOCK_MUTATE_BIN_BACKEND=dotnet MOCK_COMPILER_BIN="$tmp/compilers/dotnet"
+printf '#!/bin/sh\necho MOCK_dotnet\n' > "$tmp/compilers/dotnet"
+chmod 700 "$tmp/compilers/dotnet"
+test "$(sha256sum "$tmp/compilers/dotnet" | cut -d ' ' -f1)" = "$DB_DOTNET_COMPILER_SHA256"
+echo 'HOST_PARITY_COORDINATOR_CONTRACT_PASS cases=22; MOCK EXECUTABLES ONLY; NO NATIVE GUEST EXECUTIONS' 
