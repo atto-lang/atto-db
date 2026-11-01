@@ -8,6 +8,8 @@ on:
       - 'tests/guest/**'
       - 'src/wal/frame.ores'
       - 'ci/test-wal-nonfloating-byte-pack.sh'
+      - 'ci/verify-native-wal-negative-challenge.sh'
+      - 'ci/test-native-wal-negative-challenge.sh'
       - '.github/workflows/db-parity-preflight.yml'
 permissions:
   contents: read
@@ -34,9 +36,12 @@ jobs:
         run: |
           set -euo pipefail
           sh -n ci/verify-native-wal.sh
+          sh -n ci/verify-native-wal-negative-challenge.sh
+          sh -n ci/test-native-wal-negative-challenge.sh
           sh -n ci/verify-five-backend-wal-parity.sh
           sh -n ci/test-five-backend-preflight.sh
           sh ci/test-five-backend-preflight.sh
           sh ci/test-wal-nonfloating-byte-pack.sh
+          sh ci/test-native-wal-negative-challenge.sh
       - name: Evidence boundary
         run: echo 'This workflow tests scripts using mocks; it does not compile or run .ores, exercise a database, or attest backend parity.'
