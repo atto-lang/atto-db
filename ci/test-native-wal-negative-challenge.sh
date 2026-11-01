@@ -14,6 +14,8 @@ cat > "$tmp/bin/mock-grammar" <<'MOCK'
 set -eu
 case "${MOCK_MODE:-reject-both}" in
   reject-both) exit 1 ;;
+  timeout-like) exit 124 ;;
+  fatal-signal) exit 139 ;;
   accept-check) if [ "${1:-}" = --check ]; then exit 0; else exit 1; fi ;;
   accept-runtime) if [ "${1:-}" = --check ]; then exit 1; else exit 0; fi ;;
   reject-invalid)
@@ -40,6 +42,10 @@ MOCK_MODE=accept-check; export MOCK_MODE
 reject_challenge "$tmp/bin/mock-grammar"
 MOCK_MODE=accept-runtime; export MOCK_MODE
 reject_challenge "$tmp/bin/mock-grammar"
+MOCK_MODE=timeout-like; export MOCK_MODE
+reject_challenge "$tmp/bin/mock-grammar"
+MOCK_MODE=fatal-signal; export MOCK_MODE
+reject_challenge "$tmp/bin/mock-grammar"
 MOCK_MODE=reject-both; export MOCK_MODE
 run_challenge "$tmp/bin/mock-grammar" > "$tmp/out"
 grep -q '^NATIVE_NEGATIVE_SOURCE_CHALLENGE_PASS' "$tmp/out"
@@ -58,4 +64,4 @@ if find "$tmp/tests/guest/positive" -type f -name 'odb1-invalid-*' | grep -q .; 
   echo 'HOST_NEGATIVE_SOURCE_TEST_FAILED: malformed temp source leaked' >&2
   exit 1
 fi
-printf '%s\n' 'HOST_NATIVE_NEGATIVE_CHALLENGE_CONTRACT_PASS cases=7; MOCK COMPILERS ONLY; NO GUEST EXECUTION'
+printf '%s\n' 'HOST_NATIVE_NEGATIVE_CHALLENGE_CONTRACT_PASS cases=9; MOCK COMPILERS ONLY; NO GUEST EXECUTION'
