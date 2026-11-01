@@ -57,4 +57,5 @@ run_case tests/guest/negative/frame-single-byte-flips.ores db:wal-byte-flips-ok
 run_case tests/guest/positive/frame-size-matrix.ores db:wal-size-matrix-ok
 run_case tests/guest/positive/frame-copy-isolation.ores db:wal-copy-isolation-ok
 run_case tests/guest/negative/frame-forged-header.ores db:wal-forged-header-ok
-echo 'GUEST_WAL_CODEC_ONLY_PASS cases=8; NO DURABILITY CLAIM'
+run_case tests/guest/negative/frame-canonical-identity.ores db:wal-canonical-header-ok
+echo 'GUEST_WAL_CODEC_ONLY_PASS cases=9; NO DURABILITY CLAIM'
