@@ -1,0 +1,42 @@
+// Independently rewrite a complete ODB1 header, then recompute Adler32.
+// A stale checksum is NOT why each malformed header must be rejected.
+// Exact stdout: db:wal-forged-header-ok.
+import module wal_frame from "../../../src/wal/frame";
+pub routine main(): void {
+  let List<int> key = new List<int>();
+  let List<int> value = new List<int>();
+  key.add(107); value.add(118);
+  val source = wal_frame.encode(7,3,1,42,1,key,value);
+  if source.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val wire = source.unwrap();
+  if wire.length != 32; then stdio.stdout.write("db:FAILED"); return; fi
+  // Malformed kind, marker version, identity high-bit and key/value lengths.
+  for (let attempt = 0; attempt < 7; attempt++) {
+    let List<int> modified = new List<int>();
+    for (const octet of wire) { modified.add(octet); }
+    if attempt == 0; then modified.set(4,2); fi
+    if attempt == 1; then modified.set(5,2); fi
+    if attempt == 2; then modified.set(21,128); fi
+    if attempt == 3; then modified.set(22,0); fi
+    if attempt == 4; then modified.set(22,65); fi
+    if attempt == 5; then modified.set(24,1); modified.set(25,4); fi
+    if attempt == 6; then modified.set(0,80); fi
+    let int a = 1;
+    let int b = 0;
+    for (let at = 0; at < 28; at++) {
+      a = a + modified.get(at);
+      if a >= 65521; then a = a - 65521; fi
+      b = b + a;
+      if b >= 65521; then b = b - 65521; fi
+    }
+    modified.set(28, a - (a / 256) * 256);
+    modified.set(29, a / 256);
+    modified.set(30, b - (b / 256) * 256);
+    modified.set(31, b / 256);
+    if !wal_frame.decode(modified).is_err(); then
+      stdio.stdout.write("db:FAILED"); return;
+    fi
+  }
+  stdio.stdout.write("db:wal-forged-header-ok");
+  return;
+}

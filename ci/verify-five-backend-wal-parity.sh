@@ -32,6 +32,6 @@ for backend in java llvm wasm cranelift dotnet; do
   echo "BACKEND_ATTEMPT=$backend"
   ORESLANG_BIN="$bin" ORESLANG_COMPILER_SHA256="$digest" \
     sh ci/verify-native-wal.sh
-  echo "BACKEND_GUEST_CODEC_PASS=$backend cases=7"
+  echo "BACKEND_GUEST_CODEC_PASS=$backend cases=8"
 done
-echo 'FIVE_BACKEND_ODB1_GUEST_PARITY_PASS cases=35; NO DURABILITY CLAIM'
+echo 'FIVE_BACKEND_ODB1_GUEST_PARITY_PASS cases=40; NO DURABILITY CLAIM'
