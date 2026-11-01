@@ -18,12 +18,19 @@ trap 'rm -f "$challenge"' EXIT HUP INT TERM
 # The extra unmatched token sequence cannot be accepted by any valid grammar.
 cp "$original" "$challenge"
 printf '\nfnc ODB1_SYNTACTICALLY_IMPOSSIBLE( @@@ ??\n' >> "$challenge"
-if timeout 20s "$ORESLANG_BIN" --check "$challenge" >/dev/null 2>&1; then
-  echo 'NATIVE_COMPILER_ACCEPTED_MALFORMED_ODB1_CHECK' >&2
+# A timeout, failed exec, or crash is not a lexical/compiler rejection.
+# In particular `timeout` uses 124 for deadline, 125-127 for launcher errors,
+# and signals generally report 128+.
+check_rc=0
+timeout 20s "$ORESLANG_BIN" --check "$challenge" >/dev/null 2>&1 || check_rc=$?
+if [ "$check_rc" -eq 0 ] || [ "$check_rc" -ge 124 ]; then
+  echo "NATIVE_COMPILER_MALFORMED_CHECK_NOT_PROVED status=$check_rc" >&2
   exit 1
 fi
-if timeout 20s "$ORESLANG_BIN" "$challenge" >/dev/null 2>&1; then
-  echo 'NATIVE_COMPILER_EXECUTED_MALFORMED_ODB1' >&2
+run_rc=0
+timeout 20s "$ORESLANG_BIN" "$challenge" >/dev/null 2>&1 || run_rc=$?
+if [ "$run_rc" -eq 0 ] || [ "$run_rc" -ge 124 ]; then
+  echo "NATIVE_COMPILER_MALFORMED_RUN_NOT_PROVED status=$run_rc" >&2
   exit 1
 fi
 printf '%s\n' 'NATIVE_NEGATIVE_SOURCE_CHALLENGE_PASS (does not prove authentic backend codegen)'
