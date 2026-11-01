@@ -100,6 +100,9 @@ final class ReadOnlyOperationEvidenceLedger implements AutoCloseable {
       var evidence = new ReadOnlyOperationEvidenceLedger(owner,preopened,lock,expected,map);
       transferred = true;
       return evidence;
+    } catch (IOException | RuntimeException | Error failure) {
+      owner.quarantineFromOperationEvidence();
+      throw failure;
     } finally {
       if (!transferred && lock.isValid()) lock.release();
     }
@@ -149,6 +152,7 @@ final class ReadOnlyOperationEvidenceLedger implements AutoCloseable {
       requireSameSnapshot(sidecar,frozenSnapshot);
     } catch (IOException | RuntimeException | Error failure) {
       revoked = true;
+      custody.quarantineFromOperationEvidence();
       throw failure;
     }
   }
