@@ -5,6 +5,8 @@ on:
       - 'ci/verify-native-wal.sh'
       - 'ci/verify-five-backend-wal-parity.sh'
       - 'ci/test-five-backend-preflight.sh'
+      - 'ci/assert-native-wal-receipts.sh'
+      - 'ci/test-native-wal-receipts.sh'
       - 'tests/guest/**'
       - 'src/wal/frame.ores'
       - 'ci/test-wal-nonfloating-byte-pack.sh'
@@ -29,13 +31,16 @@ jobs:
           test -z "$(git status --porcelain)"
           echo "DB_COORDINATOR_SOURCE_HEAD=$EXPECTED_HEAD"
           echo "DB_COORDINATOR_SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
-      - name: POSIX syntax and fourteen host-only coordinator contracts
+      - name: POSIX syntax and adversarial host-only coordinator / receipt contracts
         shell: bash
         run: |
           set -euo pipefail
           sh -n ci/verify-native-wal.sh
           sh -n ci/verify-five-backend-wal-parity.sh
           sh -n ci/test-five-backend-preflight.sh
+          sh -n ci/assert-native-wal-receipts.sh
+          sh -n ci/test-native-wal-receipts.sh
+          sh ci/test-native-wal-receipts.sh
           sh ci/test-five-backend-preflight.sh
           sh ci/test-wal-nonfloating-byte-pack.sh
       - name: Evidence boundary
