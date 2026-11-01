@@ -19,13 +19,13 @@ This reduces false claims but cannot distinguish a genuine Oreslang parser from 
 
 ## Locally executed tests
 
-`sh -n` validates both new POSIX shell scripts. The separately executed `ci/test-native-wal-negative-challenge.sh` used **mock compilers only** to test nine host contracts: accept-all, accepts check only, accepts run only, timeout-like, signal-like, blanket rejection of valid and invalid source, syntax-specific rejection, bad binary digest and cleanup. Exact output:
+`sh -n` validates both new POSIX shell scripts. The separately executed `ci/test-native-wal-negative-challenge.sh` used **mock compilers only** to test nine host contracts, asserting the exact rejection message at each intended check rather than accepting any early error: accept-all, accepts check only, accepts run only, timeout-like, signal-like, blanket rejection of valid and invalid source, syntax-specific rejection, bad binary digest and cleanup. Exact output:
 
 `HOST_NATIVE_NEGATIVE_CHALLENGE_CONTRACT_PASS cases=9; MOCK COMPILERS ONLY; NO GUEST EXECUTION`
 
 Two new Git blob SHA pins independently matched locally executed files:
 - `ci/verify-native-wal-negative-challenge.sh`: `1df30da9847ad634d6121ff33cbbdc321a17ee02`
-- `ci/test-native-wal-negative-challenge.sh`: `3b6dabb00f4e103da0a335ca407442027190a0cf`
+- `ci/test-native-wal-negative-challenge.sh`: `7b97e5749c9e11d71c3314531b0ef09a52f45703`
 
 The PR updates the existing `db-parity-preflight.yml` to execute this new host suite and the syntax checks, and updates `verify-native-wal.sh` to enforce the challenge for **all five configured backend adapters**. The CI result must show a runner and nonzero executed steps; a zero-step workflow is an infrastructure failure, never evidence of a passing compiler.
 
