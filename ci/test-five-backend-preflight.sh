@@ -14,14 +14,20 @@ cp "$root/ci/assert-native-wal-receipts.sh" "$tmp/repo/ci/"
 # Fake receipts deliberately test only the host contract, never .ores guests.
 sed -n 's/^run_case \(tests\/guest\/[^ ]*\) .*/\1/p' "$root/ci/verify-native-wal.sh" > "$tmp/repo/ci/guest-fixtures.list"
 test "$(wc -l < "$tmp/repo/ci/guest-fixtures.list")" -eq 15
+# Fixture digests are validated against actual bytes, even in host-only mocks.
+while IFS= read -r fixture; do
+  test -f "$root/$fixture" || exit 1
+  mkdir -p "$tmp/repo/$(dirname "$fixture")"
+  cp "$root/$fixture" "$tmp/repo/$fixture"
+done < "$tmp/repo/ci/guest-fixtures.list"
 cat > "$tmp/repo/ci/verify-native-wal.sh" <<'MOCK_GATE'
 #!/bin/sh
 set -eu
 printf 'SOURCE_COMMIT=%s\nSOURCE_TREE=%s\nCOMPILER_BINARY_SHA256=%s\n' \
   "$DB_EXPECTED_COMMIT" "$DB_EXPECTED_TREE" "$ORESLANG_COMPILER_SHA256"
 while IFS= read -r fixture; do
-  printf 'FIXTURE_SHA256=%s  %s\n' \
-    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd "$fixture"
+  actual_hash="$(sha256sum "$fixture" | cut -d ' ' -f1)"
+  printf 'FIXTURE_SHA256=%s  %s\n' "$actual_hash" "$fixture"
   printf 'GUEST_EXECUTED_PASS %s\n' "$fixture"
 done < ci/guest-fixtures.list
 echo 'GUEST_WAL_CODEC_ONLY_PASS cases=15; NO AUTHENTICATION, NO DURABILITY CLAIM'
