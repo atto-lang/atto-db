@@ -1,0 +1,33 @@
+// ODB1 signed-u32 identity edges: same unchanged guest source on all targets.
+// Exact stdout: db:wal-identities-ok; NO disk, runtime grant, or ACK.
+import module wal_frame from "../../../src/wal/frame";
+pub routine main(): void {
+  let List<int> key = new List<int>();
+  let List<int> value = new List<int>();
+  key.add(107); value.add(118);
+  val result = wal_frame.encode(2147483647,2147483647,
+    2147483647,2147483647,1,key,value);
+  if result.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val wire = result.unwrap();
+  if wire.length != 32; then stdio.stdout.write("db:FAILED"); return; fi
+  for (let at = 9; at <= 21; at = at + 4) {
+    if wire.get(at) != 127; then stdio.stdout.write("db:FAILED"); return; fi
+    let List<int> highbit = new List<int>();
+    for (let j = 0; j < wire.length; j++) {
+      if j == at; then highbit.add(128);
+      else highbit.add(wire.get(j)); fi
+    }
+    if !wal_frame.decode(highbit).is_err(); then
+      stdio.stdout.write("db:FAILED"); return;
+    fi
+  }
+  val parsed = wal_frame.decode(wire);
+  if parsed.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val f = parsed.unwrap();
+  if f.tenant != 2147483647 || f.generation != 2147483647 ||
+    f.sequence != 2147483647 || f.operation_id != 2147483647; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  stdio.stdout.write("db:wal-identities-ok");
+  return;
+}

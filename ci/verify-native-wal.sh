@@ -52,4 +52,8 @@ run_case() {
 run_case tests/guest/positive/frame-roundtrip.ores db:wal-roundtrip-ok
 run_case tests/guest/negative/frame-rejections.ores db:wal-rejections-ok
 run_case tests/guest/positive/frame-boundaries.ores db:wal-boundaries-ok
-echo 'GUEST_WAL_CODEC_ONLY_PASS cases=3; NO DURABILITY CLAIM'
+run_case tests/guest/positive/frame-identity-extremes.ores db:wal-identities-ok
+run_case tests/guest/negative/frame-single-byte-flips.ores db:wal-byte-flips-ok
+run_case tests/guest/positive/frame-size-matrix.ores db:wal-size-matrix-ok
+run_case tests/guest/positive/frame-copy-isolation.ores db:wal-copy-isolation-ok
+echo 'GUEST_WAL_CODEC_ONLY_PASS cases=7; NO DURABILITY CLAIM'
