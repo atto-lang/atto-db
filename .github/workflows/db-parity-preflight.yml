@@ -6,6 +6,8 @@ on:
       - 'ci/verify-five-backend-wal-parity.sh'
       - 'ci/test-five-backend-preflight.sh'
       - 'tests/guest/**'
+      - 'src/wal/frame.ores'
+      - 'ci/test-wal-nonfloating-byte-pack.sh'
       - '.github/workflows/db-parity-preflight.yml'
 permissions:
   contents: read
@@ -27,7 +29,7 @@ jobs:
           test -z "$(git status --porcelain)"
           echo "DB_COORDINATOR_SOURCE_HEAD=$EXPECTED_HEAD"
           echo "DB_COORDINATOR_SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
-      - name: POSIX syntax and six host-only coordinator contracts
+      - name: POSIX syntax and fourteen host-only coordinator contracts
         shell: bash
         run: |
           set -euo pipefail
@@ -35,5 +37,6 @@ jobs:
           sh -n ci/verify-five-backend-wal-parity.sh
           sh -n ci/test-five-backend-preflight.sh
           sh ci/test-five-backend-preflight.sh
+          sh ci/test-wal-nonfloating-byte-pack.sh
       - name: Evidence boundary
         run: echo 'This workflow tests scripts using mocks; it does not compile or run .ores, exercise a database, or attest backend parity.'

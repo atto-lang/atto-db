@@ -17,7 +17,9 @@ pub routine main(): void {
     for (const octet of wire) { altered.add(octet); }
     let int at = altered.length - 4 + suffix;
     let int old = altered.get(at);
-    altered.set(at, old + 1 - ((old + 1) / 256) * 256);
+    // Explicit wrap without implicit float-to-int conversion.
+    if old == 255; then altered.set(at, 0);
+    else altered.set(at, old + 1); fi
     if !wal_frame.decode(altered).is_err(); then
       stdio.stdout.write("db:FAILED"); return;
     fi

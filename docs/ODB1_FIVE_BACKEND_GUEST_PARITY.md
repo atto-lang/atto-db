@@ -78,3 +78,22 @@ Wasm or NativeAOT artifact was emitted, or that the exact guest ran. The
 end-of-script marker is deliberately `FIVE_BACKEND_ODB1_EXECUTION_CANDIDATE_PASS`,
 not a verified release/parity certificate. Independent provenance and real
 execution receipts for all five backends remain mandatory.
+
+## Stage 31b: canonical Oreslang integer-byte extraction fix
+
+The Java reference typechecker defines `int / int` as `float`; guest source
+must not implicitly narrow a floating-point quotient to `int`.
+The original WAL encoder and two adversarial checksum fixtures used
+`number / 256` and `a / 256` to extract high bytes, making these
+sources incompatible with strict Java/Graal typing (and therefore not
+portable across native backends). The codec now uses `value >> 8`
+for **nonnegative signed-int32 inputs** and `value - (upper * 256)`
+for the remainder. The checksum fixtures use the same arithmetic.
+The trailer corruption guest instead wraps 255 to zero explicitly.
+
+This fixes a **source-level semantic bug**; it does not claim that other
+backends currently support List/Result/module imports or the ODB1 actor.
+`ci/test-wal-nonfloating-byte-pack.sh` checks the affected source shape,
+runs eight independent POSIX-shell integer division/shift boundary vectors,
+and asserts the guard rejects the old invalid source. This is **HOST-ONLY**.
+Compiled real `.ores` guests and exact-head CI execution are still required.
