@@ -186,18 +186,21 @@ public final class ReadOnlyOperationEvidenceLedgerTest {
         try(var again=evidence(lease,f.odr)) {
           check(again.recordedOperations()==3,"reopen existing persisted evidence under same activation");
           byte[] damaged=Files.readAllBytes(f.odr);
+          byte[] pristine=damaged.clone();
           damaged[ReadOnlyOperationEvidenceLedger.HEADER_LENGTH+9]^=1;
           Files.write(f.odr,damaged);
           reject(()->again.reconcile(101,1,new byte[]{107},new byte[]{118}),
               ReadOnlyOperationEvidenceLedger.InvalidEvidence.class,
               "same-size ODR1 tampering cannot pass readback");
           check(again.isRevoked(),"corrupt sidecar permanently poisons evidence handle");
-          Files.write(f.odr,Arrays.copyOf(damaged,damaged.length));
+          Files.write(f.odr,pristine);
           reject(()->again.recordedOperations(),SecurityException.class,
               "restored sidecar cannot revive poisoned handle");
         }
-        reject(()->evidence(lease,f.odr),ReadOnlyOperationEvidenceLedger.InvalidEvidence.class,
-            "no silent repair of corrupt sidecar");
+        reject(()->evidence(lease,f.odr),SecurityException.class,
+            "restored bytes cannot reauthorize a poisoned activation");
+        reject(lease::verifyOffActorTurn,SecurityException.class,
+            "sidecar corruption quarantines parent activation, not just ODR handle");
       }
       check(Arrays.equals(Files.readAllBytes(f.wal),walBefore),"never modified the WAL");
     }
@@ -251,8 +254,8 @@ public final class ReadOnlyOperationEvidenceLedgerTest {
       try(var next=hold(fresh,f,5)) {
         reject(()->evidence(next,f.odr),ReadOnlyOperationEvidenceLedger.InvalidEvidence.class,
             "previous-generation receipt cannot silently migrate to next epoch");
-        check(next.verifyOffActorTurn().generation()==5,
-            "rejected stale receipt does not poison live ODF1 custody");
+        reject(next::verifyOffActorTurn,SecurityException.class,
+            "stale receipt poisons runtime activation; new epoch needs fresh sidecar");
       }
     }
     try(Fileset f=new Fileset()) {
@@ -295,8 +298,8 @@ public final class ReadOnlyOperationEvidenceLedgerTest {
         try(var next=hold(restarted,f,5)) {
           reject(()->evidence(next,f.odr),ReadOnlyOperationEvidenceLedger.InvalidEvidence.class,
               "post-process-restart old-generation ODR1 not a new-generation ACK");
-          check(next.verifyOffActorTurn().generation()==5,
-              "new generation still valid for later authenticated reconciliation");
+          reject(next::verifyOffActorTurn,SecurityException.class,
+              "old-generation evidence must poison new admission on restart");
         }
       } finally {
         if(child.isAlive())child.destroyForcibly().waitFor(5,TimeUnit.SECONDS);
