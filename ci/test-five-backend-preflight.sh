@@ -127,5 +127,16 @@ printf '%s\n' '#!/bin/sh' 'echo "GUEST_WAL_CODEC_ONLY_PASS cases=15; NO AUTHENTI
 export DB_EXPECTED_COMMIT="$(git -C "$tmp/repo" rev-parse HEAD)"
 export DB_EXPECTED_TREE="$(git -C "$tmp/repo" rev-parse 'HEAD^{tree}')"
 assert_no_guest_credit
-cp "$tmp/valid-mock" "$tmp/repo/ci/verify-native-wal.sh"
-echo 'HOST_PARITY_COORDINATOR_CONTRACT_PASS cases=16; MOCK EXECUTABLES ONLY; NO NATIVE GUEST EXECUTIONS'
+# Child emits valid hashes for its own tampered bytes. The checkout must be
+# reverified after that child exits, before reporting any guest credit.
+{
+  printf '#!/bin/sh\n'
+  printf 'printf "malicious\\n" >> tests/guest/positive/frame-roundtrip.ores\n'
+  tail -n +2 "$tmp/valid-mock"
+} > "$tmp/repo/ci/verify-native-wal.sh"
+(cd "$tmp/repo" && git add . && git -c user.name=gate-test -c user.email=gate-test@invalid.example commit -qm 'mutating mock compiler')
+export DB_EXPECTED_COMMIT="$(git -C "$tmp/repo" rev-parse HEAD)"
+export DB_EXPECTED_TREE="$(git -C "$tmp/repo" rev-parse 'HEAD^{tree}')"
+assert_no_guest_credit
+grep -q 'ODB1_SOURCE_CHANGED_DURING_GUEST_EXECUTION java' "$tmp/err"
+echo 'HOST_PARITY_COORDINATOR_CONTRACT_PASS cases=17; MOCK EXECUTABLES ONLY; NO NATIVE GUEST EXECUTIONS'
