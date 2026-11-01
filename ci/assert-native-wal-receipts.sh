@@ -53,6 +53,14 @@ BEGIN {
         substr($0,82) != expected[fixtureCount]) invalid=1
     hex=substr($0,16,64)
     if (length(hex)!=64 || hex ~ /[^0123456789abcdef]/) invalid=1
+    # Independently hash the exact pinned checkout fixture: a plausible but
+    # forged 64-character checksum must not become guest-execution evidence.
+    if (fixtureCount <= 15) {
+      command="sha256sum " expected[fixtureCount]
+      if ((command | getline actualHashLine) != 1 ||
+          $0 != "FIXTURE_SHA256=" actualHashLine) invalid=1
+      close(command)
+    }
   }
   if (index($0,"GUEST_EXECUTED_PASS ")==1) {
     guestCount++
