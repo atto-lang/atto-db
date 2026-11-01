@@ -4,17 +4,17 @@
 
 ## Boundaries
 
-- `ci/assert-native-wal-receipts.sh` requires the supplied exact OresDB **commit**, **tree**, and **individual compiler binary SHA-256** to appear exactly once; the exact 15 guest fixture paths must appear in the **ordered** `FIXTURE_SHA256` and `GUEST_EXECUTED_PASS` lines. It rejects missing, repeated, reordered, malformed or extra success lines; requires exactly one matching terminal `GUEST_WAL_CODEC_ONLY_PASS cases=15`; and caps output at 128 KiB. Any trailing lines after terminal success are denied.
+- `ci/assert-native-wal-receipts.sh` requires the supplied exact OresDB **commit**, **tree**, and **individual compiler binary SHA-256** to appear exactly once; the exact 15 guest fixture paths must appear in the **ordered** `FIXTURE_SHA256` and `GUEST_EXECUTED_PASS` lines. It recomputes each exact fixture SHA-256 from the pinned checkout and rejects mismatched checksums, missing, repeated, reordered, malformed or extra success lines; requires exactly one matching terminal `GUEST_WAL_CODEC_ONLY_PASS cases=15`; and caps output at 128 KiB. Any trailing lines after terminal success are denied.
 - `ci/verify-five-backend-wal-parity.sh` now captures each native child stdout and validates it **before** assigning any per-backend credit. It preflights physical source-root **uniqueness**, in addition to previously required independently pinned compiler paths/digests and exact git roots/commit/tree. Failures still refuse global five-backend credit.
-- `ci/test-native-wal-receipts.sh` supplies **synthetic mock logs** to exercise 16 explicit adversarial rejects and one accepted valid-shape receipt. These tests DO NOT invoke a compiler or prove guest behavior. The existing `ci/test-five-backend-preflight.sh` uses an explicit mock child with 15 well-formed receipts, adds source checkout reuse rejection, and verifies that a summary-only child exit zero cannot gain backend credit.
+- `ci/test-native-wal-receipts.sh` supplies **synthetic mock logs** to exercise 17 explicit adversarial rejects and one accepted valid-shape receipt. These tests DO NOT invoke a compiler or prove guest behavior. The existing `ci/test-five-backend-preflight.sh` uses an explicit mock child with 15 well-formed receipts, adds source checkout reuse rejection, and verifies that a summary-only child exit zero cannot gain backend credit.
 - The host-only GitHub workflow invokes both shell tests and POSIX syntax preflight. **If Actions has zero runner steps, hosted verification remains unexecuted.**
 
 ### Executed local evidence
 
-The new receipt helper and its exact GitHub-matching test file, GNU awk and `/bin/sh`, were executed **five rounds**, each yielding `HOST_NATIVE_GUEST_RECEIPT_REJECTION_PASS negative_cases=16; MOCK LOGS ONLY` (**80/80 malformed-case rejections**, plus one correctly shaped synthetic success each round). Both files' local `git hash-object` values match GitHub's returned blob SHAs:
+The new receipt helper and its exact GitHub-matching test file, GNU awk and `/bin/sh`, were executed **five rounds**, each yielding `HOST_NATIVE_GUEST_RECEIPT_REJECTION_PASS negative_cases=17; MOCK LOGS ONLY` (**85/85 malformed-case rejections**, plus one correctly shaped synthetic success each round). Both files' local `git hash-object` values match GitHub's returned blob SHAs:
 
-- `ci/assert-native-wal-receipts.sh`: `466a9bdfcd3076e59165cf226e251e6696e04821`
-- `ci/test-native-wal-receipts.sh`: `1972b9b8b0a32d3103eb594ddf05a7c5fc4a4dcb`
+- `ci/assert-native-wal-receipts.sh`: `8ff5464c4ac2046ad756ffb92c0ec489bfeb454a`
+- `ci/test-native-wal-receipts.sh`: `a637ddd072ace3388b195e26f70a62147120a581`
 
 The integrated coordinator/workflow are committed but **not yet verified by a hosted runner**. Do not claim all 75 guest cells passed. The existing coordinator's mock test remains explicitly a **host-only test**.
 
