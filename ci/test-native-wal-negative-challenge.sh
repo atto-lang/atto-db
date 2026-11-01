@@ -19,8 +19,12 @@ case "${MOCK_MODE:-reject-both}" in
   accept-check) if [ "${1:-}" = --check ]; then exit 0; else exit 1; fi ;;
   accept-runtime) if [ "${1:-}" = --check ]; then exit 1; else exit 0; fi ;;
   reject-invalid)
-    case "${1:-}" in --check) shift;; esac
+    was_check=no
+    case "${1:-}" in --check) shift; was_check=yes;; esac
     if grep -q 'ODB1_SYNTACTICALLY_IMPOSSIBLE' "$1"; then exit 1; fi
+    if [ "${1:-}" != --check ] && [ "$was_check" != yes ]; then
+      printf '%s' 'db:wal-roundtrip-ok'
+    fi
     exit 0 ;;
   *) exit 99 ;;
 esac
@@ -47,8 +51,7 @@ reject_challenge "$tmp/bin/mock-grammar"
 MOCK_MODE=fatal-signal; export MOCK_MODE
 reject_challenge "$tmp/bin/mock-grammar"
 MOCK_MODE=reject-both; export MOCK_MODE
-run_challenge "$tmp/bin/mock-grammar" > "$tmp/out"
-grep -q '^NATIVE_NEGATIVE_SOURCE_CHALLENGE_PASS' "$tmp/out"
+reject_challenge "$tmp/bin/mock-grammar"
 MOCK_MODE=reject-invalid; export MOCK_MODE
 run_challenge "$tmp/bin/mock-grammar" > "$tmp/out"
 grep -q '^NATIVE_NEGATIVE_SOURCE_CHALLENGE_PASS' "$tmp/out"
