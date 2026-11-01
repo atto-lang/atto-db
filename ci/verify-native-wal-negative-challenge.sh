@@ -14,7 +14,8 @@ original=tests/guest/positive/frame-roundtrip.ores
 test -f "$original"
 challenge=$(mktemp 'tests/guest/positive/odb1-invalid-XXXXXXXX.ores')
 control=$(mktemp)
-trap 'rm -f "$challenge" "$control"' EXIT HUP INT TERM
+rewrite=$(mktemp)
+trap 'rm -f "$challenge" "$control" "$rewrite"' EXIT HUP INT TERM
 # Preserve the positive fixture's import-relative directory and all its code.
 # The extra unmatched token sequence cannot be accepted by any valid grammar.
 cp "$original" "$challenge"
@@ -30,6 +31,28 @@ if ! timeout 20s "$ORESLANG_BIN" "$challenge" >"$control" 2>/dev/null; then
 fi
 if ! printf '%s' 'db:wal-roundtrip-ok' | cmp - "$control" >/dev/null; then
   echo 'NATIVE_COMPILER_WRONG_VALID_COPY_STDOUT' >&2
+  exit 1
+fi
+# Metamorphic execution test: preserve the same import path but change the
+# source's successful output. A wrapper that always echoes the canonical
+# fixture string cannot pass just by rejecting invalid syntax.
+test "$(grep -Fc 'stdio.stdout.write("db:wal-roundtrip-ok")' "$challenge")" -eq 1 || {
+  echo 'NATIVE_COMPILER_CONTROL_SENTINEL_NOT_UNIQUE' >&2; exit 1;
+}
+metamorphic="db:wal-morph-$(basename "$challenge" .ores)"
+sed "s@stdio.stdout.write(\"db:wal-roundtrip-ok\")@stdio.stdout.write(\"$metamorphic\")@" \
+  "$challenge" > "$rewrite"
+cp "$rewrite" "$challenge"
+if ! timeout 20s "$ORESLANG_BIN" --check "$challenge" >/dev/null 2>&1; then
+  echo 'NATIVE_COMPILER_CANNOT_CHECK_METAMORPHIC_COPY' >&2
+  exit 1
+fi
+if ! timeout 20s "$ORESLANG_BIN" "$challenge" >"$control" 2>/dev/null; then
+  echo 'NATIVE_COMPILER_CANNOT_RUN_METAMORPHIC_COPY' >&2
+  exit 1
+fi
+if ! printf '%s' "$metamorphic" | cmp - "$control" >/dev/null; then
+  echo 'NATIVE_COMPILER_WRONG_METAMORPHIC_STDOUT' >&2
   exit 1
 fi
 printf '\nfnc ODB1_SYNTACTICALLY_IMPOSSIBLE( @@@ ??\n' >> "$challenge"
