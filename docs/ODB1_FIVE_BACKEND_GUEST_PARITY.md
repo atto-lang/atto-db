@@ -60,3 +60,21 @@ recovery parity after the codec gate passes.
 
 No independent approved private-source mirror or source-org nonzero-step CI has
 been established by this source-only change. Keep the stack draft.
+
+## Stage 31 provenance gate (host-only; not a backend certification)
+
+For each of the five independently provisioned adapters, the matrix now
+requires `DB_<BACKEND>_SOURCE_ROOT`, `_SOURCE_COMMIT` and `_SOURCE_TREE`,
+as well as `_COMPILER_BIN` and `_COMPILER_SHA256`. Before any run is credited
+it verifies each root is an absolute clean Git checkout and matches its own
+40-digit exact commit/tree. A second check occurs at execution dispatch.
+The mock harness creates five distinct disposable source repos and runs
+**14/14** preflight cases, including wrong source commit/tree, dirty checkout,
+relative root, binary digest/missing executable, duplicate binary and dirty DB tree.
+
+**These inputs are claims, not cryptographic compiler build attestation**.
+They do not prove the pinned executable came from that source commit, that a
+Wasm or NativeAOT artifact was emitted, or that the exact guest ran. The
+end-of-script marker is deliberately `FIVE_BACKEND_ODB1_EXECUTION_CANDIDATE_PASS`,
+not a verified release/parity certificate. Independent provenance and real
+execution receipts for all five backends remain mandatory.

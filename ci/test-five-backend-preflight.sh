@@ -14,6 +14,21 @@ printf '%s\n' '#!/bin/sh' 'set -eu' 'echo MOCK_WAL_GATE_ONLY' > "$tmp/repo/ci/ve
 for backend in java llvm wasm cranelift dotnet; do
   printf '#!/bin/sh\necho MOCK_%s\n' "$backend" > "$tmp/compilers/$backend"
   chmod 700 "$tmp/compilers/$backend"
+  mkdir -p "$tmp/sources/$backend"
+  (
+    cd "$tmp/sources/$backend"
+    git init -q
+    printf 'test-only-source=%s\n' "$backend" > provenance.txt
+    git add .
+    git -c user.name=gate-test -c user.email=gate-test@invalid.example commit -qm source
+  )
+  upper="$(printf '%s' "$backend" | tr '[:lower:]' '[:upper:]')"
+  source_root="$tmp/sources/$backend"
+  source_commit="$(git -C "$source_root" rev-parse HEAD)"
+  source_tree="$(git -C "$source_root" rev-parse 'HEAD^{tree}')"
+  export "DB_${upper}_SOURCE_ROOT=$source_root"
+  export "DB_${upper}_SOURCE_COMMIT=$source_commit"
+  export "DB_${upper}_SOURCE_TREE=$source_tree"
 done
 (
   cd "$tmp/repo"
@@ -37,7 +52,7 @@ export DB_DOTNET_COMPILER_SHA256="$(sha256sum "$DB_DOTNET_COMPILER_BIN" | cut -d
   cd "$tmp/repo"
   sh ci/verify-five-backend-wal-parity.sh
 ) > "$tmp/out" 2> "$tmp/err"
-grep -q '^FIVE_BACKEND_ODB1_GUEST_PARITY_PASS cases=75;' "$tmp/out"
+grep -q '^FIVE_BACKEND_ODB1_EXECUTION_CANDIDATE_PASS cases=75;' "$tmp/out"
 test "$(grep -c '^BACKEND_ATTEMPT=' "$tmp/out")" -eq 5
 # Invalid configurations must fail *before* any per-backend guest credit.
 assert_preflight_failure() {
@@ -61,4 +76,10 @@ assert_preflight_failure env DB_WASM_COMPILER_BIN=relative-path-not-allowed
 assert_preflight_failure env DB_JAVA_COMPILER_SHA256=incorrect-length-digest
 assert_preflight_failure env DB_CRANELIFT_COMPILER_BIN=/absent-cranelift-compiler
 assert_preflight_failure env DB_EXPECTED_TREE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-echo 'HOST_PARITY_COORDINATOR_CONTRACT_PASS cases=10; MOCK EXECUTABLES ONLY; NO NATIVE GUEST EXECUTIONS'
+assert_preflight_failure env DB_LLVM_SOURCE_ROOT=relative-source-root
+assert_preflight_failure env DB_DOTNET_SOURCE_COMMIT=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+printf 'dirty\n' > "$tmp/sources/wasm/untracked"
+assert_preflight_failure env
+rm "$tmp/sources/wasm/untracked"
+assert_preflight_failure env DB_CRANELIFT_SOURCE_TREE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+echo 'HOST_PARITY_COORDINATOR_CONTRACT_PASS cases=14; MOCK EXECUTABLES ONLY; NO NATIVE GUEST EXECUTIONS'
