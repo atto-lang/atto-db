@@ -11,21 +11,21 @@ The prior native runner checked an independently provided compiler binary hash a
 Before awarding any positive native guest pass, `verify-native-wal.sh` runs `ci/verify-native-wal-negative-challenge.sh`. The helper:
 
 1. Requires the same absolute compiler executable and validates its independently pinned SHA-256 again. The parent runner has already verified the Git commit/tree and each backend's separate source checkout and executable digest.
-2. Copies a known valid guest into a randomized temporary **same-directory** `.ores` path, retaining relative import behavior, then appends a deliberately malformed syntax fragment. Source files that Git tracks are never overwritten.
-3. Invokes that exact compiler twice: once with `--check`, once with normal source execution. Both must reject with a normal nonzero status **1..123**. Acceptance (`0`), timeout (`124`), launcher errors (`125..127`) and signal/crash statuses (`128+`) are **failures** and confer no backend credit.
-4. Deletes the temporary source through an exit/signal trap. Existing positive ODB1 fixtures continue to require exact check/execute output and all 15 case receipts.
+2. Copies a known valid guest into a randomized temporary **same-directory** `.ores` path, retaining relative import behavior. **Before mutation, the very same copied source** must successfully pass `--check` and execute with exact `db:wal-roundtrip-ok` stdout. Blanket rejection of temporary paths cannot satisfy this gate.
+3. Appends an impossible syntax fragment to that same file and invokes that same SHA-pinned compiler again in `--check` and normal execution modes. Both must reject with a normal nonzero status **1..123**. Acceptance (`0`), timeout (`124`), launcher errors (`125..127`) and signal/crash statuses (`128+`) are **failures** and confer no backend credit.
+4. Deletes both the temporary source and output-control file through an exit/signal trap. Existing positive ODB1 fixtures continue to require exact check/execute output and all 15 case receipts.
 
 This reduces false claims but cannot distinguish a genuine Oreslang parser from an advanced mock that intentionally rejects malformed syntax. **Actual native backend artifacts and runtime executions remain independently required.**
 
 ## Locally executed tests
 
-`sh -n` validates both new POSIX shell scripts. The separately executed `ci/test-native-wal-negative-challenge.sh` used **mock compilers only** to test nine host contracts: accept-all, accepts check only, accepts run only, timeout-like, signal-like, ordinary rejection, syntax-specific rejection, bad binary digest and cleanup. Exact output:
+`sh -n` validates both new POSIX shell scripts. The separately executed `ci/test-native-wal-negative-challenge.sh` used **mock compilers only** to test nine host contracts: accept-all, accepts check only, accepts run only, timeout-like, signal-like, blanket rejection of valid and invalid source, syntax-specific rejection, bad binary digest and cleanup. Exact output:
 
 `HOST_NATIVE_NEGATIVE_CHALLENGE_CONTRACT_PASS cases=9; MOCK COMPILERS ONLY; NO GUEST EXECUTION`
 
 Two new Git blob SHA pins independently matched locally executed files:
-- `ci/verify-native-wal-negative-challenge.sh`: `0f308baa46f0472b42de647b76c1859bb38391c5`
-- `ci/test-native-wal-negative-challenge.sh`: `3bc6541418bc99f3a1abe93b226d8e03ab7a618d`
+- `ci/verify-native-wal-negative-challenge.sh`: `1df30da9847ad634d6121ff33cbbdc321a17ee02`
+- `ci/test-native-wal-negative-challenge.sh`: `3b6dabb00f4e103da0a335ca407442027190a0cf`
 
 The PR updates the existing `db-parity-preflight.yml` to execute this new host suite and the syntax checks, and updates `verify-native-wal.sh` to enforce the challenge for **all five configured backend adapters**. The CI result must show a runner and nonzero executed steps; a zero-step workflow is an infrastructure failure, never evidence of a passing compiler.
 
