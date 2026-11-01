@@ -12,22 +12,25 @@ printf '%s\n' '#!/bin/sh' 'exit 0' > "$tmp/bin/accept-all"
 cat > "$tmp/bin/mock-grammar" <<'MOCK'
 #!/bin/sh
 set -eu
-case "${MOCK_MODE:-reject-both}" in
-  reject-both) exit 1 ;;
-  timeout-like) exit 124 ;;
-  fatal-signal) exit 139 ;;
-  accept-check) if [ "${1:-}" = --check ]; then exit 0; else exit 1; fi ;;
-  accept-runtime) if [ "${1:-}" = --check ]; then exit 1; else exit 0; fi ;;
-  reject-invalid)
-    was_check=no
-    case "${1:-}" in --check) shift; was_check=yes;; esac
-    if grep -q 'ODB1_SYNTACTICALLY_IMPOSSIBLE' "$1"; then exit 1; fi
-    if [ "${1:-}" != --check ] && [ "$was_check" != yes ]; then
-      printf '%s' 'db:wal-roundtrip-ok'
-    fi
-    exit 0 ;;
-  *) exit 99 ;;
-esac
+was_check=no
+if [ "${1:-}" = --check ]; then shift; was_check=yes; fi
+bad=no
+if grep -q 'ODB1_SYNTACTICALLY_IMPOSSIBLE' "$1"; then bad=yes; fi
+mode=${MOCK_MODE:-reject-invalid}
+if [ "$mode" = reject-both ]; then exit 1; fi
+if [ "$bad" = yes ]; then
+  case "$mode" in
+    accept-all) exit 0 ;;
+    accept-check) if [ "$was_check" = yes ]; then exit 0; else exit 1; fi ;;
+    accept-runtime) if [ "$was_check" = no ]; then exit 0; else exit 1; fi ;;
+    timeout-like) exit 124 ;;
+    fatal-signal) exit 139 ;;
+    reject-invalid) exit 1 ;;
+    *) exit 99 ;;
+  esac
+fi
+if [ "$was_check" = no ]; then printf '%s' 'db:wal-roundtrip-ok'; fi
+exit 0
 MOCK
 chmod 700 "$tmp/bin/accept-all" "$tmp/bin/mock-grammar"
 run_challenge() {
@@ -36,22 +39,30 @@ run_challenge() {
     sh ci/verify-native-wal-negative-challenge.sh)
 }
 reject_challenge() {
-  if run_challenge "$1" > "$tmp/out" 2> "$tmp/err"; then
+  expected="$1"; exe="$2"
+  if run_challenge "$exe" > "$tmp/out" 2> "$tmp/err"; then
     echo 'HOST_NEGATIVE_SOURCE_TEST_FAILED: accepted invalid compiler' >&2
     exit 1
   fi
+  if ! grep -Fq "$expected" "$tmp/err"; then
+    echo "HOST_NEGATIVE_SOURCE_TEST_FAILED: wrong rejection stage, expected $expected" >&2
+    cat "$tmp/err" >&2
+    exit 1
+  fi
 }
-reject_challenge "$tmp/bin/accept-all"
+# Every test must reach the intended validation branch, not merely fail early.
+MOCK_MODE=accept-all; export MOCK_MODE
+reject_challenge NATIVE_COMPILER_MALFORMED_CHECK_NOT_PROVED "$tmp/bin/mock-grammar"
 MOCK_MODE=accept-check; export MOCK_MODE
-reject_challenge "$tmp/bin/mock-grammar"
+reject_challenge NATIVE_COMPILER_MALFORMED_CHECK_NOT_PROVED "$tmp/bin/mock-grammar"
 MOCK_MODE=accept-runtime; export MOCK_MODE
-reject_challenge "$tmp/bin/mock-grammar"
+reject_challenge NATIVE_COMPILER_MALFORMED_RUN_NOT_PROVED "$tmp/bin/mock-grammar"
 MOCK_MODE=timeout-like; export MOCK_MODE
-reject_challenge "$tmp/bin/mock-grammar"
+reject_challenge 'NATIVE_COMPILER_MALFORMED_CHECK_NOT_PROVED status=124' "$tmp/bin/mock-grammar"
 MOCK_MODE=fatal-signal; export MOCK_MODE
-reject_challenge "$tmp/bin/mock-grammar"
+reject_challenge 'NATIVE_COMPILER_MALFORMED_CHECK_NOT_PROVED status=139' "$tmp/bin/mock-grammar"
 MOCK_MODE=reject-both; export MOCK_MODE
-reject_challenge "$tmp/bin/mock-grammar"
+reject_challenge NATIVE_COMPILER_CANNOT_CHECK_VALID_TEMP_COPY "$tmp/bin/mock-grammar"
 MOCK_MODE=reject-invalid; export MOCK_MODE
 run_challenge "$tmp/bin/mock-grammar" > "$tmp/out"
 grep -q '^NATIVE_NEGATIVE_SOURCE_CHALLENGE_PASS' "$tmp/out"
