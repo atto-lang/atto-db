@@ -31,7 +31,7 @@ jobs:
           test "$(git hash-object 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyOperationEvidenceLedger.java')" = '6a3ca6685505d309c22686d21e3dd5125dd95235'
           test "$(git hash-object 'runtime/java/src/org/oreslang/db/primitive/VerifiedShadowWalResumption.java')" = '8e02e74af21239c670f0fed42cd298c2f6b3449d'
           test "$(git hash-object 'runtime/java/test/org/oreslang/db/primitive/VerifiedShadowWalResumptionIntegrationTest.java')" = 'ef40821bbe29ec8c61d36b4d6bde73246d12acf7'
-          test "$(git hash-object 'runtime/java/test/org/oreslang/db/primitive/VerifiedShadowWalResumeContractTest.java')" = 'f81ed20abf5f32ae388b16d91c8f4d7f3c14c137'
+          test "$(git hash-object 'runtime/java/test/org/oreslang/db/primitive/VerifiedShadowWalResumeContractTest.java')" = '5096c87108b9cd327b35a6337eca2d9c44052ef2'
           echo "SOURCE_COMMIT=$(git rev-parse HEAD)"
           echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
       - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165

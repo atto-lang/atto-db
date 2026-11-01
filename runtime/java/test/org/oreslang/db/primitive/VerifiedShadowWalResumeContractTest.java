@@ -1,32 +1,36 @@
 package org.oreslang.db.primitive;
 
-/** Minimal hosted compilation contract; extended real-FD tests run locally. */
+/** Exact Probe-only source contract: this does NOT test any WAL/actor/guest. */
 public final class VerifiedShadowWalResumeContractTest {
   private VerifiedShadowWalResumeContractTest() { }
+  private static int checks;
+  private static void check(boolean ok, String label) {
+    checks++;
+    if (!ok) throw new AssertionError(label);
+  }
   public static void main(String[] args) {
-    byte[] hash = new byte[32];
-    var diagnostic = new VerifiedShadowWalResumption.Probe(4,5,105,96,128,hash);
-    hash[0] = 7;
-    if (diagnostic.generation()!=4 || diagnostic.nextSequence()!=5 ||
-        diagnostic.operationId()!=105 || diagnostic.sourceBytes()!=96 ||
-        diagnostic.shadowBytes()!=128 || diagnostic.shadowSha256()[0]!=0 ||
-        diagnostic.canResumeWrites() || diagnostic.canAcknowledgeGuest())
-      throw new AssertionError("shadow-only probe contract broken");
-    byte[] copy = diagnostic.shadowSha256();
-    copy[0] = 9;
-    if (diagnostic.shadowSha256()[0]!=0)
-      throw new AssertionError("probe digest getter leaked mutable storage");
-    // Constructor rejects a null digest: a diagnostic without a stable hash
-    // cannot be trusted for even source-only comparisons.
-    boolean refused=false;
-    try { new VerifiedShadowWalResumption.Probe(4,5,105,96,128,null); }
-    catch(NullPointerException expected) { refused=true; }
-    if(!refused)throw new AssertionError("null digest accepted");
-    if(diagnostic.canResumeWrites()||diagnostic.canAcknowledgeGuest())
-      throw new AssertionError("probe exposed writer or guest authority");
-    if(diagnostic.shadowSha256().length!=32 ||
-       diagnostic.shadowSha256()[0]!=0)
-      throw new AssertionError("defensive SHA256 copy or size broken");
-    System.out.println("HOST_SHADOW_WAL_CONTRACT_PASS checks=12 (NO live writer or guest ACK)");
+    if (args.length != 0) throw new IllegalArgumentException("unexpected args");
+    byte[] digest = new byte[32];
+    var probe = new VerifiedShadowWalResumption.Probe(4, 5, 105, 96, 128, digest);
+    check(probe.generation() == 4, "generation");
+    check(probe.nextSequence() == 5, "sequence");
+    check(probe.operationId() == 105, "operation identity");
+    check(probe.sourceBytes() == 96, "source offset");
+    check(probe.shadowBytes() == 128, "shadow offset");
+    check(probe.shadowSha256().length == 32, "digest size");
+    check(!probe.canResumeWrites(), "no writer promotion");
+    check(!probe.canAcknowledgeGuest(), "no guest ACK");
+    digest[0] = 7;
+    check(probe.shadowSha256()[0] == 0, "constructor defensively copied");
+    byte[] returned = probe.shadowSha256();
+    returned[0] = 9;
+    check(probe.shadowSha256()[0] == 0, "getter defensively copied");
+    check(returned != probe.shadowSha256(), "getter returns independent array");
+    boolean nullDenied = false;
+    try { new VerifiedShadowWalResumption.Probe(4, 5, 105, 96, 128, null); }
+    catch (NullPointerException expected) { nullDenied = true; }
+    check(nullDenied, "null digest denied");
+    System.out.println("HOST_SHADOW_WAL_CONTRACT_PASS checks=" + checks +
+        " (NO live writer or guest ACK)");
   }
 }
