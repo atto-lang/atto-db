@@ -53,7 +53,8 @@ assert_preflight_failure() {
 assert_preflight_failure env DB_DOTNET_COMPILER_BIN=
 assert_preflight_failure env DB_WASM_COMPILER_SHA256=0000000000000000000000000000000000000000000000000000000000000000
 assert_preflight_failure env DB_EXPECTED_COMMIT=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+assert_preflight_failure env DB_LLVM_COMPILER_BIN="$DB_JAVA_COMPILER_BIN" DB_LLVM_COMPILER_SHA256="$DB_JAVA_COMPILER_SHA256"
 printf 'dirty\n' > "$tmp/repo/untracked"
 assert_preflight_failure env
 rm "$tmp/repo/untracked"
-echo 'HOST_PARITY_COORDINATOR_CONTRACT_PASS cases=5; MOCK EXECUTABLES ONLY; NO NATIVE GUEST EXECUTIONS'
+echo 'HOST_PARITY_COORDINATOR_CONTRACT_PASS cases=6; MOCK EXECUTABLES ONLY; NO NATIVE GUEST EXECUTIONS'
