@@ -10,7 +10,22 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 mkdir -p "$tmp/repo/ci" "$tmp/compilers"
 cp "$root/ci/verify-five-backend-wal-parity.sh" "$tmp/repo/ci/"
-printf '%s\n' '#!/bin/sh' 'set -eu' 'echo MOCK_WAL_GATE_ONLY' > "$tmp/repo/ci/verify-native-wal.sh"
+cp "$root/ci/assert-native-wal-receipts.sh" "$tmp/repo/ci/"
+# Fake receipts deliberately test only the host contract, never .ores guests.
+sed -n 's/^run_case \(tests\/guest\/[^ ]*\) .*/\1/p' "$root/ci/verify-native-wal.sh" > "$tmp/repo/ci/guest-fixtures.list"
+test "$(wc -l < "$tmp/repo/ci/guest-fixtures.list")" -eq 15
+cat > "$tmp/repo/ci/verify-native-wal.sh" <<'MOCK_GATE'
+#!/bin/sh
+set -eu
+printf 'SOURCE_COMMIT=%s\nSOURCE_TREE=%s\nCOMPILER_BINARY_SHA256=%s\n' \
+  "$DB_EXPECTED_COMMIT" "$DB_EXPECTED_TREE" "$ORESLANG_COMPILER_SHA256"
+while IFS= read -r fixture; do
+  printf 'FIXTURE_SHA256=%s  %s\n' \
+    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd "$fixture"
+  printf 'GUEST_EXECUTED_PASS %s\n' "$fixture"
+done < ci/guest-fixtures.list
+echo 'GUEST_WAL_CODEC_ONLY_PASS cases=15; NO AUTHENTICATION, NO DURABILITY CLAIM'
+MOCK_GATE
 for backend in java llvm wasm cranelift dotnet; do
   printf '#!/bin/sh\necho MOCK_%s\n' "$backend" > "$tmp/compilers/$backend"
   chmod 700 "$tmp/compilers/$backend"
@@ -82,4 +97,29 @@ printf 'dirty\n' > "$tmp/sources/wasm/untracked"
 assert_preflight_failure env
 rm "$tmp/sources/wasm/untracked"
 assert_preflight_failure env DB_CRANELIFT_SOURCE_TREE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-echo 'HOST_PARITY_COORDINATOR_CONTRACT_PASS cases=14; MOCK EXECUTABLES ONLY; NO NATIVE GUEST EXECUTIONS'
+# Different binary wrappers may NOT reuse an identical backend source root.
+assert_preflight_failure env \
+  DB_LLVM_SOURCE_ROOT="$DB_JAVA_SOURCE_ROOT" \
+  DB_LLVM_SOURCE_COMMIT="$DB_JAVA_SOURCE_COMMIT" \
+  DB_LLVM_SOURCE_TREE="$DB_JAVA_SOURCE_TREE"
+# Child may exit 0 with a fake terminal success; no guest credit is allowed.
+assert_no_guest_credit() {
+  if (cd "$tmp/repo" && sh ci/verify-five-backend-wal-parity.sh) > "$tmp/out" 2> "$tmp/err"; then
+    echo 'FAILED: incomplete guest receipt accepted as five-backend parity' >&2
+    exit 1
+  fi
+  if grep -q '^BACKEND_GUEST_CODEC_PASS=' "$tmp/out"; then
+    echo 'FAILED: backend credited without complete guest receipts' >&2
+    exit 1
+  fi
+}
+cp "$tmp/repo/ci/verify-native-wal.sh" "$tmp/valid-mock"
+printf '%s\n' '#!/bin/sh' 'echo "GUEST_WAL_CODEC_ONLY_PASS cases=15; NO AUTHENTICATION, NO DURABILITY CLAIM"' \
+  > "$tmp/repo/ci/verify-native-wal.sh"
+# Re-commit test-only fixture so the exact root/tree preflight succeeds.
+(cd "$tmp/repo" && git add . && git -c user.name=gate-test -c user.email=gate-test@invalid.example commit -qm 'mock terminal-only output')
+export DB_EXPECTED_COMMIT="$(git -C "$tmp/repo" rev-parse HEAD)"
+export DB_EXPECTED_TREE="$(git -C "$tmp/repo" rev-parse 'HEAD^{tree}')"
+assert_no_guest_credit
+cp "$tmp/valid-mock" "$tmp/repo/ci/verify-native-wal.sh"
+echo 'HOST_PARITY_COORDINATOR_CONTRACT_PASS cases=16; MOCK EXECUTABLES ONLY; NO NATIVE GUEST EXECUTIONS'
