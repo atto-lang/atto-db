@@ -101,6 +101,15 @@ for phase in preflight execute; do
         echo "BACKEND_GUEST_RECEIPTS_INVALID $backend" >&2
         exit 1
       fi
+      # The compiler may have mutated fixture or source bytes *during* its run.
+      # Validate both checked-out roots again before assigning guest credit.
+      if [ -n "$(git status --porcelain)" ] ||
+         [ "$(git rev-parse HEAD)" != "$DB_EXPECTED_COMMIT" ] ||
+         [ "$(git rev-parse 'HEAD^{tree}')" != "$DB_EXPECTED_TREE" ]; then
+        echo "ODB1_SOURCE_CHANGED_DURING_GUEST_EXECUTION $backend" >&2
+        exit 1
+      fi
+      check_source_checkout "$source_root" "$source_commit" "$source_tree" "$backend"
       cat "$receipt_log"
       echo "BACKEND_GUEST_CODEC_PASS=$backend cases=15"
     fi
