@@ -35,6 +35,10 @@ printf 'SOURCE_COMMIT=%s\nSOURCE_TREE=%s\nCOMPILER_BINARY_SHA256=%s\n' \
   "$actual_commit" "$actual_tree" "$ORESLANG_COMPILER_SHA256"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+# Both --check and normal execution must reject a malformed *copy* of a
+# known-good guest in the same import-relative directory. This rejects
+# accept-all stubs before awarding any native guest case credit.
+sh ci/verify-native-wal-negative-challenge.sh
 completed_cases=0
 run_case() {
   file="$1"
