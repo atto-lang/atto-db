@@ -13,10 +13,25 @@ command -v timeout >/dev/null 2>&1
 original=tests/guest/positive/frame-roundtrip.ores
 test -f "$original"
 challenge=$(mktemp 'tests/guest/positive/odb1-invalid-XXXXXXXX.ores')
-trap 'rm -f "$challenge"' EXIT HUP INT TERM
+control=$(mktemp)
+trap 'rm -f "$challenge" "$control"' EXIT HUP INT TERM
 # Preserve the positive fixture's import-relative directory and all its code.
 # The extra unmatched token sequence cannot be accepted by any valid grammar.
 cp "$original" "$challenge"
+# The very same temporary path must be a valid source location BEFORE we
+# mutate it. Otherwise blanket rejection of tmp paths would yield false credit.
+if ! timeout 20s "$ORESLANG_BIN" --check "$challenge" >/dev/null 2>&1; then
+  echo 'NATIVE_COMPILER_CANNOT_CHECK_VALID_TEMP_COPY' >&2
+  exit 1
+fi
+if ! timeout 20s "$ORESLANG_BIN" "$challenge" >"$control" 2>/dev/null; then
+  echo 'NATIVE_COMPILER_CANNOT_RUN_VALID_TEMP_COPY' >&2
+  exit 1
+fi
+if ! printf '%s' 'db:wal-roundtrip-ok' | cmp - "$control" >/dev/null; then
+  echo 'NATIVE_COMPILER_WRONG_VALID_COPY_STDOUT' >&2
+  exit 1
+fi
 printf '\nfnc ODB1_SYNTACTICALLY_IMPOSSIBLE( @@@ ??\n' >> "$challenge"
 # A timeout, failed exec, or crash is not a lexical/compiler rejection.
 # In particular `timeout` uses 124 for deadline, 125-127 for launcher errors,
