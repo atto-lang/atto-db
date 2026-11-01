@@ -30,7 +30,8 @@ jobs:
           test "$(git hash-object 'runtime/java/src/org/oreslang/db/primitive/DbShardLifetimeCustody.java')" = 'eca235561374b971d6892b5a6a682a6cce27513c'
           test "$(git hash-object 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyOperationEvidenceLedger.java')" = '6a3ca6685505d309c22686d21e3dd5125dd95235'
           test "$(git hash-object 'runtime/java/src/org/oreslang/db/primitive/VerifiedShadowWalResumption.java')" = '8e02e74af21239c670f0fed42cd298c2f6b3449d'
-          test "$(git hash-object 'runtime/java/test/org/oreslang/db/primitive/VerifiedShadowWalResumptionIntegrationTest.java')" = 'c8f9df3363b514aaf826102a89037137127cd07c'
+          test "$(git hash-object 'runtime/java/test/org/oreslang/db/primitive/VerifiedShadowWalResumptionIntegrationTest.java')" = 'ef40821bbe29ec8c61d36b4d6bde73246d12acf7'
+          test "$(git hash-object 'runtime/java/test/org/oreslang/db/primitive/VerifiedShadowWalResumeContractTest.java')" = 'f81ed20abf5f32ae388b16d91c8f4d7f3c14c137'
           echo "SOURCE_COMMIT=$(git rev-parse HEAD)"
           echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
       - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
@@ -52,12 +53,19 @@ jobs:
             runtime/java/src/org/oreslang/db/primitive/DbShardLifetimeCustody.java \
             runtime/java/src/org/oreslang/db/primitive/ReadOnlyOperationEvidenceLedger.java \
             runtime/java/src/org/oreslang/db/primitive/VerifiedShadowWalResumption.java \
-            runtime/java/test/org/oreslang/db/primitive/VerifiedShadowWalResumptionIntegrationTest.java
-          printf '%s\n' 'HOST_SHADOW_WAL_INTEGRATION_PASS checks=22 (actual WAL/ODF1/ODR1; NO writer promotion or guest ACK)' > "$RUNNER_TEMP/expected"
+            runtime/java/test/org/oreslang/db/primitive/VerifiedShadowWalResumptionIntegrationTest.java \
+            runtime/java/test/org/oreslang/db/primitive/VerifiedShadowWalResumeContractTest.java
+          printf '%s\n' 'HOST_SHADOW_WAL_INTEGRATION_PASS checks=42 (actual WAL/ODF1/ODR1; NO writer promotion or guest ACK)' > "$RUNNER_TEMP/expected"
           for round in 1 2 3 4 5; do
             timeout 55s java -cp "$RUNNER_TEMP/db-shadow-index" \
               org.oreslang.db.primitive.VerifiedShadowWalResumptionIntegrationTest \
               > "$RUNNER_TEMP/actual"
             cmp "$RUNNER_TEMP/expected" "$RUNNER_TEMP/actual"
             cat "$RUNNER_TEMP/actual"
+            timeout 55s java -cp "$RUNNER_TEMP/db-shadow-index" \
+              org.oreslang.db.primitive.VerifiedShadowWalResumeContractTest \
+              > "$RUNNER_TEMP/actual-contract"
+            printf '%s\n' 'HOST_SHADOW_WAL_CONTRACT_PASS checks=12 (NO live writer or guest ACK)' > "$RUNNER_TEMP/expected-contract"
+            cmp "$RUNNER_TEMP/expected-contract" "$RUNNER_TEMP/actual-contract"
+            cat "$RUNNER_TEMP/actual-contract"
           done

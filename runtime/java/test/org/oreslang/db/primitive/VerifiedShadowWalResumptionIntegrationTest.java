@@ -34,6 +34,27 @@ public final class VerifiedShadowWalResumptionIntegrationTest {
     return FileChannel.open(p,StandardOpenOption.READ,StandardOpenOption.WRITE);
   }
 
+
+  @FunctionalInterface private interface CheckedAction {
+    void run() throws Exception;
+  }
+
+  private static void expectInvalid(CheckedAction test,String message)
+      throws Exception {
+    boolean refused=false;
+    try { test.run(); }
+    catch(IllegalArgumentException expected) { refused=true; }
+    check(refused,message);
+  }
+
+  private static void expectRejected(CheckedAction test,String message)
+      throws Exception {
+    boolean refused=false;
+    try { test.run(); }
+    catch(RejectedExecutionException expected) { refused=true; }
+    check(refused,message);
+  }
+
   /** Valid ODB1 bytes are insufficient when lifetime key slots are full. */
   private static byte[] keyFrame(int seq,int op,byte[] key) {
     var b=ByteBuffer.allocate(31+key.length).order(ByteOrder.LITTLE_ENDIAN);
@@ -228,6 +249,55 @@ public final class VerifiedShadowWalResumptionIntegrationTest {
             catch(RejectedExecutionException expected){refused=true;}
             check(refused,"reject conflicting operation ID from recovered WAL");
 
+            // Validation must reject malformed requests before any physical
+            // shadow mutation, and preserve the source WAL and evidence.
+            expectInvalid(() -> VerifiedShadowWalResumption.stageFreshFixture(
+                lease,receipt,sh,0,1,new byte[]{109},new byte[]{1}),
+                "zero operation ID");
+            expectInvalid(() -> VerifiedShadowWalResumption.stageFreshFixture(
+                lease,receipt,sh,-1,1,new byte[]{109},new byte[]{1}),
+                "negative operation ID");
+            expectInvalid(() -> VerifiedShadowWalResumption.stageFreshFixture(
+                lease,receipt,sh,104,0,new byte[]{109},new byte[]{1}),
+                "kind zero rejected");
+            expectInvalid(() -> VerifiedShadowWalResumption.stageFreshFixture(
+                lease,receipt,sh,104,3,new byte[]{109},new byte[]{1}),
+                "unknown operation kind rejected");
+            expectInvalid(() -> VerifiedShadowWalResumption.stageFreshFixture(
+                lease,receipt,sh,104,1,new byte[0],new byte[]{1}),
+                "empty key rejected");
+            expectInvalid(() -> VerifiedShadowWalResumption.stageFreshFixture(
+                lease,receipt,sh,104,1,new byte[65],new byte[]{1}),
+                "65-byte key rejected");
+            expectInvalid(() -> VerifiedShadowWalResumption.stageFreshFixture(
+                lease,receipt,sh,104,1,new byte[]{109},new byte[1025]),
+                "1025-byte value rejected");
+            expectInvalid(() -> VerifiedShadowWalResumption.stageFreshFixture(
+                lease,receipt,sh,104,2,new byte[]{109},new byte[]{1}),
+                "DELETE with nonempty payload rejected");
+            check(sh.size()==0,"malformed submissions did not write shadow");
+            check(Arrays.equals(Files.readAllBytes(wal),source),
+                "malformed submissions left original WAL unchanged");
+
+            // An independently-held OS lock must deny staging without
+            // changing the descriptor or consuming an operation ID.
+            try(var independentLock=sh.lock()) {
+              expectRejected(() -> VerifiedShadowWalResumption.stageFreshFixture(
+                  lease,receipt,sh,104,1,new byte[]{109},new byte[]{122}),
+                  "overlapping shadow inode lock denied");
+              check(independentLock.isValid()&&sh.size()==0,
+                  "lock conflict preserves existing holder and empty file");
+            }
+
+            // Non-empty garbage is never automatically repaired or truncated.
+            Files.write(shadow,new byte[]{1,2,3});
+            expectRejected(() -> VerifiedShadowWalResumption.stageFreshFixture(
+                lease,receipt,sh,104,1,new byte[]{109},new byte[]{122}),
+                "nonempty shadow refused before append");
+            check(Arrays.equals(Files.readAllBytes(shadow),new byte[]{1,2,3}),
+                "invalid existing shadow bytes preserved untouched");
+            Files.write(shadow,new byte[0]);
+
             // A malicious (or racing) caller mutates its own request arrays
             // when the storage lock is acquired. The admitted request must
             // retain the original bytes, not the later caller mutation.
@@ -246,7 +316,32 @@ public final class VerifiedShadowWalResumptionIntegrationTest {
                   "mutation cannot promote shadow into writer or client ACK");
               check(Arrays.equals(Files.readAllBytes(wal),source),
                   "mutation cannot alter original source WAL");
+              byte[] digest=probe.shadowSha256();
+              check(digest.length==32&&Arrays.equals(digest,frozen.snapshotSha256()),
+                  "probe SHA256 equals independent read-only WAL scan");
+              digest[0]^=1;
+              check(Arrays.equals(probe.shadowSha256(),frozen.snapshotSha256()),
+                  "mutating returned hash cannot change probe receipt");
             }
+
+            // DELETE is valid with empty value; it remains a shadow-only
+            // materialization, not permission for a production mutation.
+            Files.write(shadow,new byte[0]);
+            var deleted=VerifiedShadowWalResumption.stageFreshFixture(
+                lease,receipt,sh,105,2,new byte[]{109},new byte[0]);
+            var deletedScan=ReadOnlyWalReplay.inspectPreopened(sh,7);
+            var finalFrame=deletedScan.records().get(deletedScan.records().size()-1);
+            check(finalFrame.kind()==2&&finalFrame.operationId()==105&&
+                Arrays.equals(finalFrame.key(),new byte[]{109})&&
+                finalFrame.value().length==0,"DELETE frame has exact ID, key, and empty value");
+            var deletedIndex=ReadOnlyShardRecovery.inspectPreopened(sh,7);
+            check(deletedIndex.candidateGet(new byte[]{109}).isEmpty(),
+                "DELETE shadow candidate leaves key absent");
+            check(deleted.shadowBytes()==sh.size() &&
+                !deleted.canResumeWrites()&&!deleted.canAcknowledgeGuest(),
+                "DELETE cannot produce a live database write or ACK");
+            check(Arrays.equals(Files.readAllBytes(wal),source),
+                "DELETE shadow leaves source physical WAL byte-identical");
           }
         }
       }

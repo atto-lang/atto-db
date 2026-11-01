@@ -16,6 +16,17 @@ public final class VerifiedShadowWalResumeContractTest {
     copy[0] = 9;
     if (diagnostic.shadowSha256()[0]!=0)
       throw new AssertionError("probe digest getter leaked mutable storage");
-    System.out.println("HOST_SHADOW_WAL_CONTRACT_PASS checks=9 (NO live writer or guest ACK)");
+    // Constructor rejects a null digest: a diagnostic without a stable hash
+    // cannot be trusted for even source-only comparisons.
+    boolean refused=false;
+    try { new VerifiedShadowWalResumption.Probe(4,5,105,96,128,null); }
+    catch(NullPointerException expected) { refused=true; }
+    if(!refused)throw new AssertionError("null digest accepted");
+    if(diagnostic.canResumeWrites()||diagnostic.canAcknowledgeGuest())
+      throw new AssertionError("probe exposed writer or guest authority");
+    if(diagnostic.shadowSha256().length!=32 ||
+       diagnostic.shadowSha256()[0]!=0)
+      throw new AssertionError("defensive SHA256 copy or size broken");
+    System.out.println("HOST_SHADOW_WAL_CONTRACT_PASS checks=12 (NO live writer or guest ACK)");
   }
 }
