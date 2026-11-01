@@ -1,0 +1,27 @@
+// Checksum corruption at any one of four trailer octets must reject.
+// This proves accidental-damage detection only, not authentication.
+// Exact stdout: db:wal-trailer-corruption-ok.
+import module wal_frame from "../../../src/wal/frame";
+pub routine main(): void {
+  let List<int> key = new List<int>();
+  let List<int> value = new List<int>();
+  key.add(107); value.add(118);
+  val encoded = wal_frame.encode(7, 3, 1, 42, 1, key, value);
+  if encoded.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val wire = encoded.unwrap();
+  if wire.length != 32 || wal_frame.decode(wire).is_err(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  for (let suffix = 0; suffix < 4; suffix++) {
+    let List<int> altered = new List<int>();
+    for (const octet of wire) { altered.add(octet); }
+    let int at = altered.length - 4 + suffix;
+    let int old = altered.get(at);
+    altered.set(at, old + 1 - ((old + 1) / 256) * 256);
+    if !wal_frame.decode(altered).is_err(); then
+      stdio.stdout.write("db:FAILED"); return;
+    fi
+  }
+  stdio.stdout.write("db:wal-trailer-corruption-ok");
+  return;
+}

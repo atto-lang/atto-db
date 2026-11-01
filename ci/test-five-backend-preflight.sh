@@ -37,7 +37,7 @@ export DB_DOTNET_COMPILER_SHA256="$(sha256sum "$DB_DOTNET_COMPILER_BIN" | cut -d
   cd "$tmp/repo"
   sh ci/verify-five-backend-wal-parity.sh
 ) > "$tmp/out" 2> "$tmp/err"
-grep -q '^FIVE_BACKEND_ODB1_GUEST_PARITY_PASS cases=45;' "$tmp/out"
+grep -q '^FIVE_BACKEND_ODB1_GUEST_PARITY_PASS cases=75;' "$tmp/out"
 test "$(grep -c '^BACKEND_ATTEMPT=' "$tmp/out")" -eq 5
 # Invalid configurations must fail *before* any per-backend guest credit.
 assert_preflight_failure() {
@@ -57,4 +57,8 @@ assert_preflight_failure env DB_LLVM_COMPILER_BIN="$DB_JAVA_COMPILER_BIN" DB_LLV
 printf 'dirty\n' > "$tmp/repo/untracked"
 assert_preflight_failure env
 rm "$tmp/repo/untracked"
-echo 'HOST_PARITY_COORDINATOR_CONTRACT_PASS cases=6; MOCK EXECUTABLES ONLY; NO NATIVE GUEST EXECUTIONS'
+assert_preflight_failure env DB_WASM_COMPILER_BIN=relative-path-not-allowed
+assert_preflight_failure env DB_JAVA_COMPILER_SHA256=incorrect-length-digest
+assert_preflight_failure env DB_CRANELIFT_COMPILER_BIN=/absent-cranelift-compiler
+assert_preflight_failure env DB_EXPECTED_TREE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+echo 'HOST_PARITY_COORDINATOR_CONTRACT_PASS cases=10; MOCK EXECUTABLES ONLY; NO NATIVE GUEST EXECUTIONS'

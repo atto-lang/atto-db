@@ -35,6 +35,7 @@ printf 'SOURCE_COMMIT=%s\nSOURCE_TREE=%s\nCOMPILER_BINARY_SHA256=%s\n' \
   "$actual_commit" "$actual_tree" "$ORESLANG_COMPILER_SHA256"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+completed_cases=0
 run_case() {
   file="$1"
   expected="$2"
@@ -47,6 +48,7 @@ run_case() {
     cat "$tmp/runtime.err" >&2
     exit 1
   fi
+  completed_cases=$((completed_cases + 1))
   echo "GUEST_EXECUTED_PASS $file"
 }
 run_case tests/guest/positive/frame-roundtrip.ores db:wal-roundtrip-ok
@@ -58,4 +60,11 @@ run_case tests/guest/positive/frame-size-matrix.ores db:wal-size-matrix-ok
 run_case tests/guest/positive/frame-copy-isolation.ores db:wal-copy-isolation-ok
 run_case tests/guest/negative/frame-forged-header.ores db:wal-forged-header-ok
 run_case tests/guest/negative/frame-canonical-identity.ores db:wal-canonical-header-ok
-echo 'GUEST_WAL_CODEC_ONLY_PASS cases=9; NO DURABILITY CLAIM'
+run_case tests/guest/positive/frame-binary-octets.ores db:wal-binary-octets-ok
+run_case tests/guest/negative/frame-prefix-suffix.ores db:wal-framing-ok
+run_case tests/guest/positive/frame-adler-collision.ores db:wal-adler-collision-ok
+run_case tests/guest/positive/frame-operation-is-not-dedup.ores db:wal-codec-not-dedup-ok
+run_case tests/guest/negative/frame-trailer-each-byte.ores db:wal-trailer-corruption-ok
+run_case tests/guest/positive/frame-u16-length-endian.ores db:wal-u16-endian-ok
+test "$completed_cases" -eq 15 || { echo 'incomplete guest codec corpus' >&2; exit 1; }
+echo 'GUEST_WAL_CODEC_ONLY_PASS cases=15; NO AUTHENTICATION, NO DURABILITY CLAIM'

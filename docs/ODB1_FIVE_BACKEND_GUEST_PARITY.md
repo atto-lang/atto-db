@@ -20,3 +20,43 @@ Five targets × nine cases = **45 required compiler-backed guest executions**; n
 `ci/test-five-backend-preflight.sh` creates a disposable local Git repository and **mock** executable files, never a real Oreslang compiler. It exercises six shell orchestration cases: one nominal mocked matrix, missing .NET launcher, corrupted WASM executable digest, wrong exact source-commit pin, reuse of the same compiler binary/hash under Java and LLVM, and a dirty working tree. All five negative cases must fail **before** any `BACKEND_ATTEMPT` line or backend guest credit. This preflight is an integrity/consistency guard, **not compiler authenticity**: a correctly hashed arbitrary fake launcher can still produce output matching a fixture. Rejecting shared digests does not prove different code generators were used. Compiler provenance, generated artifact identity and actual backend execution require independent attestation and must not be inferred from this script.
 
 The path-scoped `.github/workflows/db-parity-preflight.yml` runs these host-only self-tests when an Actions runner is admitted. A configured workflow or zero-step GitHub Actions failure does not count as execution. The baseline shell and Python reference checks performed while authoring the extra fixture validate shell orchestration and six recomputed-checksum vectors only, not the .ores parser or runtime.
+
+## Stage 31 adversarial ODB1 guest corpus (authored; NOT executed)
+
+Six additional source-identical native `.ores` fixtures extend the nine existing codec cases
+to **15 cases per backend / 75 required compiler-backed guest executions**:
+
+- Binary keys/values containing 0, 128 and 255 must retain exact bytes.
+- All 32 strict prefixes of the 32-byte golden record, a trailing octet, and two
+  concatenated records must be rejected as *one* ODB1 frame.
+- An explicit +1/-2/+1 three-key-octet Adler-32 collision must **decode successfully
+  as altered data with unchanged checksum**. This is a *security limitation oracle*,
+  not a sign of authentication. A checksum cannot authorize tenant data or WAL ACK.
+- Two syntactically valid records with the same operation ID and different sequences
+  both decode. **Persistent idempotency and replay reconciliation belong to the
+  shard ledger**, not the codec; the test must not become a deduplication claim.
+- Mutating each of the four checksum-trailer octets must reject.
+- A 64-octet key and 256-octet value must encode little-endian length bytes
+  [64,0][0,1] and round-trip in an exactly 350-byte record.
+
+`verify-native-wal.sh` runs all fifteen cases with byte-exact stdout and counts each
+completed case before declaring a backend codec-only result. The five-backend
+orchestrator requires all five externally provisioned, hash-pinned compiler adapters
+and the exact DB source commit and tree, for 75 total guest invocations.
+The expanded shell mock-only preflight covers ten distinct cases and **must never**
+be counted as an Oreslang guest result. The compiler SHA alone does not authenticate
+compiler build origin, backend identity, NativeAOT image, Wasm artifact or codegen;
+independent build provenance and actual native execution receipts remain P0.
+
+**Backend capability gap (not a waiver):** Java/GraalVM has a broad interpreter
+but these exact cases still lack verified guest execution. LLVM has a narrow native
+module/class/Result subset; Wasm is currently limited to pure i64 output through an
+LLVM bridge; Cranelift ships scalar expression JIT; and .NET shipping NativeAOT
+supports a scalar compiler, not List/Frame/module/Result imports. A backend that
+cannot compile and run the unchanged guest source must FAIL, not be credited by a
+host-side wire encoder or a fake launcher. The required parity target is full
+source-level execution on **all five**, with separate actor/async storage and
+recovery parity after the codec gate passes.
+
+No independent approved private-source mirror or source-org nonzero-step CI has
+been established by this source-only change. Keep the stack draft.
