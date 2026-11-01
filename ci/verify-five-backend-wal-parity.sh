@@ -15,6 +15,7 @@ esac
 test -z "$(git status --porcelain)" || { echo 'dirty repository' >&2; exit 2; }
 test "$(git rev-parse HEAD)" = "$DB_EXPECTED_COMMIT"
 test "$(git rev-parse 'HEAD^{tree}')" = "$DB_EXPECTED_TREE"
+seen_digests=''
 for phase in preflight execute; do
   for backend in java llvm wasm cranelift dotnet; do
     case "$backend" in
@@ -33,6 +34,12 @@ for phase in preflight execute; do
     printf '%s  %s\n' "$digest" "$bin" | sha256sum -c - >/dev/null || {
       echo "BINARY_DIGEST_MISMATCH $backend" >&2; exit 2;
     }
+    if [ "$phase" = preflight ]; then
+      case " $seen_digests " in
+        *" $digest "*) echo "BACKEND_BINARY_REUSED $backend" >&2; exit 2 ;;
+      esac
+      seen_digests="$seen_digests $digest"
+    fi
     if [ "$phase" = execute ]; then
       echo "BACKEND_ATTEMPT=$backend"
       ORESLANG_BIN="$bin" ORESLANG_COMPILER_SHA256="$digest" \
