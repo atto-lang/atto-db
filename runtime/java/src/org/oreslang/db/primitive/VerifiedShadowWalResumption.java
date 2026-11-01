@@ -61,6 +61,10 @@ final class VerifiedShadowWalResumption {
       if (evidence.reconcile(operationId,kind,key,value) !=
           ReadOnlyOperationEvidenceLedger.Reconciliation.NOT_OBSERVED_OUTCOME_UNKNOWN)
         throw new RejectedExecutionException("duplicate/conflicting fixture operation ID");
+      // A full history cannot accept another ODB1 record, even in shadow.
+      // Refuse before touching the disposable file.
+      if (scan.records().size() >= ReadOnlyWalReplay.MAX_RECORDS)
+        throw new RejectedExecutionException("shadow WAL record limit exhausted");
       if (scan.lastSequence() == Integer.MAX_VALUE ||
           diagnostic.generation() <= scan.lastGeneration())
         throw new RejectedExecutionException("unsafe next sequence or epoch");
@@ -96,6 +100,17 @@ final class VerifiedShadowWalResumption {
       if (last.operationId() != operationId || last.kind() != kind ||
           !Arrays.equals(last.key(),key) || !Arrays.equals(last.value(),value))
         throw new IOException("wrong shadow operation after fsync");
+      // Byte-valid ODB1 is insufficient: 128 lifetime keys and the live
+      // value budget also apply. Invalid shadows never yield a Probe.
+      // They are disposable and must not be repaired or promoted.
+      var index = ReadOnlyShardRecovery.inspectPreopened(
+          shadow,custody.key().tenant());
+      if (index.recordCount() != checked.records().size() ||
+          index.lastSequence() != nextSequence ||
+          index.lastGeneration() != diagnostic.generation() ||
+          index.inspectedBytes() != whole.length ||
+          !Arrays.equals(index.snapshotSha256(),checked.snapshotSha256()))
+        throw new IOException("shadow index materialization mismatch");
       // Verify the frozen source STILL matches its ODF1/ODR1 evidence.
       var after = custody.verifyOffActorTurn();
       if (!Arrays.equals(after.walSha256(),diagnostic.walSha256()) ||

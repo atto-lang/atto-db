@@ -1,0 +1,63 @@
+name: OresDB stage20 bounded-index shadow WAL (host only)
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/db-shadow-wal-index.yml'
+      - 'runtime/java/src/org/oreslang/db/primitive/VerifiedShadowWalResumption.java'
+      - 'runtime/java/test/org/oreslang/db/primitive/VerifiedShadowWalResumptionIntegrationTest.java'
+permissions:
+  contents: read
+jobs:
+  bounded-index:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Verify exact PR HEAD and seven Java Git blobs
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          test "$(git hash-object 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java')" = '8da48ec37b5a2ab8cb141c2403669fce6ffb6024'
+          test "$(git hash-object 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyShardRecovery.java')" = '5208e8503587eb69aeb908a62bfd223b32961583'
+          test "$(git hash-object 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyGenerationFenceLedger.java')" = '3713fd611c8f5c7594aae5b2eb1b3317833c6efc'
+          test "$(git hash-object 'runtime/java/src/org/oreslang/db/primitive/DbShardLifetimeCustody.java')" = 'eca235561374b971d6892b5a6a682a6cce27513c'
+          test "$(git hash-object 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyOperationEvidenceLedger.java')" = '6a3ca6685505d309c22686d21e3dd5125dd95235'
+          test "$(git hash-object 'runtime/java/src/org/oreslang/db/primitive/VerifiedShadowWalResumption.java')" = '5ca7f4a5f265be34f6e9f7a7f8e52432e3c05d90'
+          test "$(git hash-object 'runtime/java/test/org/oreslang/db/primitive/VerifiedShadowWalResumptionIntegrationTest.java')" = '1af452b1df29280507074fbc3e6a0a9129617c4b'
+          echo "SOURCE_COMMIT=$(git rev-parse HEAD)"
+          echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Compile strict Java21 and execute five host-only index regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -version
+          javac -version
+          sha256sum "$(readlink -f "$(command -v java)")" "$(readlink -f "$(command -v javac)")"
+          mkdir -p "$RUNNER_TEMP/db-shadow-index"
+          javac -Xlint:all -Werror -d "$RUNNER_TEMP/db-shadow-index" \
+            runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java \
+            runtime/java/src/org/oreslang/db/primitive/ReadOnlyShardRecovery.java \
+            runtime/java/src/org/oreslang/db/primitive/ReadOnlyGenerationFenceLedger.java \
+            runtime/java/src/org/oreslang/db/primitive/DbShardLifetimeCustody.java \
+            runtime/java/src/org/oreslang/db/primitive/ReadOnlyOperationEvidenceLedger.java \
+            runtime/java/src/org/oreslang/db/primitive/VerifiedShadowWalResumption.java \
+            runtime/java/test/org/oreslang/db/primitive/VerifiedShadowWalResumptionIntegrationTest.java
+          printf '%s\n' 'HOST_SHADOW_WAL_INTEGRATION_PASS checks=18 (actual WAL/ODF1/ODR1; NO writer promotion or guest ACK)' > "$RUNNER_TEMP/expected"
+          for round in 1 2 3 4 5; do
+            timeout 55s java -cp "$RUNNER_TEMP/db-shadow-index" \
+              org.oreslang.db.primitive.VerifiedShadowWalResumptionIntegrationTest \
+              > "$RUNNER_TEMP/actual"
+            cmp "$RUNNER_TEMP/expected" "$RUNNER_TEMP/actual"
+            cat "$RUNNER_TEMP/actual"
+          done
