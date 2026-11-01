@@ -4,6 +4,7 @@
 set -eu
 export LC_ALL=C
 root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd -P)"
+cd "$root"
 helper="$root/ci/assert-native-wal-receipts.sh"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
@@ -68,12 +69,12 @@ sed '$d' "$tmp/valid" > "$tmp/bad"; must_reject
 { sed '$d' "$tmp/valid"; printf '%s\n' 'GUEST_WAL_CODEC_ONLY_PASS cases=15; NO AUTHENTICATION, NO DURABILITY CLAIM'; printf 'forged-final-line\n'; } > "$tmp/bad"; must_reject
 # Correctly shaped but incorrect fixture hash must be rejected even though
 # it is 64 lowercase hex characters.
-sed '0,/^FIXTURE_SHA256=/s/^FIXTURE_SHA256=[0-9a-f]\{64\}/FIXTURE_SHA256=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee/' "$tmp/valid" > "$tmp/bad"; must_reject
-cp "$tmp/valid" "$tmp/bad"; sed -i 's/^FIXTURE_SHA256=[0-9a-f]/FIXTURE_SHA256=z/' "$tmp/bad"; must_reject
-cp "$tmp/valid" "$tmp/bad"; sed -i 's/^FIXTURE_SHA256=[0-9a-f]\{64\}/FIXTURE_SHA256=ddddddd/' "$tmp/bad"; must_reject
+awk '/^FIXTURE_SHA256=/ && !changed++ {sub(/^FIXTURE_SHA256=[0-9a-f]+/, "FIXTURE_SHA256=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")} {print}' "$tmp/valid" > "$tmp/bad"; must_reject
+sed 's/^FIXTURE_SHA256=[0-9a-f]/FIXTURE_SHA256=z/' "$tmp/valid" > "$tmp/bad"; must_reject
+sed 's/^FIXTURE_SHA256=[0-9a-f]\{64\}/FIXTURE_SHA256=ddddddd/' "$tmp/valid" > "$tmp/bad"; must_reject
 # Out-of-order fixture announcement and duplicate file-hash rows.
 awk '/^FIXTURE_SHA256=/ && !once++ {print; print; next} {print}' "$tmp/valid" > "$tmp/bad"; must_reject
-sed '0,/tests\/guest\/positive\/frame-roundtrip.ores/s@tests/guest/positive/frame-roundtrip.ores@tests/guest/positive/forged.ores@' "$tmp/valid" > "$tmp/bad"; must_reject
+awk '/^FIXTURE_SHA256=/ && !changed++ {sub(/tests\/guest\/positive\/frame-roundtrip\.ores/,"tests/guest/positive/forged.ores")} {print}' "$tmp/valid" > "$tmp/bad"; must_reject
 # Any trailing log lines after a terminal success are rejected.
 cp "$tmp/valid" "$tmp/bad"; printf 'unexpected-tail\n' >> "$tmp/bad"; must_reject
 # Excessively large child output should not be trusted or scanned indefinitely.
