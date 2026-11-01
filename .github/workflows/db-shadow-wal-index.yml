@@ -29,8 +29,8 @@ jobs:
           test "$(git hash-object 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyGenerationFenceLedger.java')" = '3713fd611c8f5c7594aae5b2eb1b3317833c6efc'
           test "$(git hash-object 'runtime/java/src/org/oreslang/db/primitive/DbShardLifetimeCustody.java')" = 'eca235561374b971d6892b5a6a682a6cce27513c'
           test "$(git hash-object 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyOperationEvidenceLedger.java')" = '6a3ca6685505d309c22686d21e3dd5125dd95235'
-          test "$(git hash-object 'runtime/java/src/org/oreslang/db/primitive/VerifiedShadowWalResumption.java')" = '5ca7f4a5f265be34f6e9f7a7f8e52432e3c05d90'
-          test "$(git hash-object 'runtime/java/test/org/oreslang/db/primitive/VerifiedShadowWalResumptionIntegrationTest.java')" = '1af452b1df29280507074fbc3e6a0a9129617c4b'
+          test "$(git hash-object 'runtime/java/src/org/oreslang/db/primitive/VerifiedShadowWalResumption.java')" = '8e02e74af21239c670f0fed42cd298c2f6b3449d'
+          test "$(git hash-object 'runtime/java/test/org/oreslang/db/primitive/VerifiedShadowWalResumptionIntegrationTest.java')" = 'c8f9df3363b514aaf826102a89037137127cd07c'
           echo "SOURCE_COMMIT=$(git rev-parse HEAD)"
           echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
       - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
@@ -53,7 +53,7 @@ jobs:
             runtime/java/src/org/oreslang/db/primitive/ReadOnlyOperationEvidenceLedger.java \
             runtime/java/src/org/oreslang/db/primitive/VerifiedShadowWalResumption.java \
             runtime/java/test/org/oreslang/db/primitive/VerifiedShadowWalResumptionIntegrationTest.java
-          printf '%s\n' 'HOST_SHADOW_WAL_INTEGRATION_PASS checks=18 (actual WAL/ODF1/ODR1; NO writer promotion or guest ACK)' > "$RUNNER_TEMP/expected"
+          printf '%s\n' 'HOST_SHADOW_WAL_INTEGRATION_PASS checks=22 (actual WAL/ODF1/ODR1; NO writer promotion or guest ACK)' > "$RUNNER_TEMP/expected"
           for round in 1 2 3 4 5; do
             timeout 55s java -cp "$RUNNER_TEMP/db-shadow-index" \
               org.oreslang.db.primitive.VerifiedShadowWalResumptionIntegrationTest \

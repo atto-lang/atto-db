@@ -39,9 +39,15 @@ final class VerifiedShadowWalResumption {
     Objects.requireNonNull(shadow);
     Objects.requireNonNull(key);
     Objects.requireNonNull(value);
+    // Freeze the request before any external lock, runtime, or I/O callback
+    // can execute. Caller-owned arrays must not change the operation that
+    // was admitted and authenticated. This is still HOST-only.
+    byte[] stableKey = key.clone();
+    byte[] stableValue = value.clone();
     custody.requireOffActorTurnForEvidence();
-    if (operationId <= 0 || (kind != 1 && kind != 2) || key.length < 1 || key.length > 64 ||
-        value.length > 1024 || (kind == 2 && value.length != 0))
+    if (operationId <= 0 || (kind != 1 && kind != 2) ||
+        stableKey.length < 1 || stableKey.length > 64 ||
+        stableValue.length > 1024 || (kind == 2 && stableValue.length != 0))
       throw new IllegalArgumentException("invalid shadow fixture");
     if (!shadow.isOpen()) throw new IllegalArgumentException("closed shadow descriptor");
     FileLock shadowLock;
@@ -58,7 +64,7 @@ final class VerifiedShadowWalResumption {
         throw new SecurityException("ODR1 and WAL record count disagree");
       // Missing operation IDs are UNKNOWN in production. This API is restricted
       // to an explicit synthetic, never-client-acknowledged fixture.
-      if (evidence.reconcile(operationId,kind,key,value) !=
+      if (evidence.reconcile(operationId,kind,stableKey,stableValue) !=
           ReadOnlyOperationEvidenceLedger.Reconciliation.NOT_OBSERVED_OUTCOME_UNKNOWN)
         throw new RejectedExecutionException("duplicate/conflicting fixture operation ID");
       // A full history cannot accept another ODB1 record, even in shadow.
@@ -74,7 +80,7 @@ final class VerifiedShadowWalResumption {
           !Arrays.equals(sha256(prefix),scan.snapshotSha256()))
         throw new SecurityException("noncanonical WAL prefix cannot be resumed");
       byte[] appended = frame(custody.key().tenant(),diagnostic.generation(),
-          nextSequence,operationId,kind,key,value);
+          nextSequence,operationId,kind,stableKey,stableValue);
       if (appended.length > ReadOnlyWalReplay.MAX_BYTES - prefix.length)
         throw new RejectedExecutionException("shadow WAL byte budget exhausted");
       byte[] whole = new byte[prefix.length + appended.length];
@@ -98,7 +104,7 @@ final class VerifiedShadowWalResumption {
         throw new IOException("shadow WAL post-sync verification failed");
       var last = checked.records().get(checked.records().size()-1);
       if (last.operationId() != operationId || last.kind() != kind ||
-          !Arrays.equals(last.key(),key) || !Arrays.equals(last.value(),value))
+          !Arrays.equals(last.key(),stableKey) || !Arrays.equals(last.value(),stableValue))
         throw new IOException("wrong shadow operation after fsync");
       // Byte-valid ODB1 is insufficient: 128 lifetime keys and the live
       // value budget also apply. Invalid shadows never yield a Probe.
