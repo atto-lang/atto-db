@@ -42,6 +42,8 @@ check_source_checkout() {
   }
 }
 seen_digests=''
+seen_source_roots=''
+db_checkout_root="$(pwd -P)"
 for phase in preflight execute; do
   for backend in java llvm wasm cranelift dotnet; do
     case "$backend" in
@@ -72,6 +74,15 @@ for phase in preflight execute; do
     }
     check_source_checkout "$source_root" "$source_commit" "$source_tree" "$backend"
     if [ "$phase" = preflight ]; then
+      # Independently pinned commits are insufficient if two backend labels
+      # accidentally refer to one checkout (including aliased absolute roots).
+      if [ "$physical" = "$db_checkout_root" ]; then
+        echo "BACKEND_SOURCE_IS_DB_REPO $backend" >&2; exit 2
+      fi
+      if printf '%s\n' "$seen_source_roots" | grep -Fx -- "$physical" >/dev/null; then
+        echo "BACKEND_SOURCE_ROOT_REUSED $backend" >&2; exit 2
+      fi
+      seen_source_roots="$(printf '%s\n%s' "$seen_source_roots" "$physical")"
       case " $seen_digests " in
         *" $digest "*) echo "BACKEND_BINARY_REUSED $backend" >&2; exit 2 ;;
       esac
@@ -81,9 +92,9 @@ for phase in preflight execute; do
       echo "BACKEND_ATTEMPT=$backend"
       ORESLANG_BIN="$bin" ORESLANG_COMPILER_SHA256="$digest" \
         sh ci/verify-native-wal.sh
-      echo "BACKEND_GUEST_CODEC_PASS=$backend cases=15"
+      echo "BACKEND_GUEST_CODEC_PASS=$backend cases=16"
     fi
   done
   if [ "$phase" = preflight ]; then echo 'FIVE_BACKEND_PREFLIGHT_PASS; NO GUEST EXECUTION YET'; fi
 done
-echo 'FIVE_BACKEND_ODB1_EXECUTION_CANDIDATE_PASS cases=75; NO AUTHENTICATION OR DURABILITY CLAIM'
+echo 'FIVE_BACKEND_ODB1_EXECUTION_CANDIDATE_PASS cases=80; NO AUTHENTICATION OR DURABILITY CLAIM'
