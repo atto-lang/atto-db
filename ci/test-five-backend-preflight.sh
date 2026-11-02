@@ -52,7 +52,7 @@ export DB_DOTNET_COMPILER_SHA256="$(sha256sum "$DB_DOTNET_COMPILER_BIN" | cut -d
   cd "$tmp/repo"
   sh ci/verify-five-backend-wal-parity.sh
 ) > "$tmp/out" 2> "$tmp/err"
-grep -q '^FIVE_BACKEND_ODB1_EXECUTION_CANDIDATE_PASS cases=75;' "$tmp/out"
+grep -q '^FIVE_BACKEND_ODB1_EXECUTION_CANDIDATE_PASS cases=80;' "$tmp/out"
 test "$(grep -c '^BACKEND_ATTEMPT=' "$tmp/out")" -eq 5
 # Invalid configurations must fail *before* any per-backend guest credit.
 assert_preflight_failure() {
@@ -82,4 +82,20 @@ printf 'dirty\n' > "$tmp/sources/wasm/untracked"
 assert_preflight_failure env
 rm "$tmp/sources/wasm/untracked"
 assert_preflight_failure env DB_CRANELIFT_SOURCE_TREE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-echo 'HOST_PARITY_COORDINATOR_CONTRACT_PASS cases=14; MOCK EXECUTABLES ONLY; NO NATIVE GUEST EXECUTIONS'
+# An independently labeled compiler must not borrow another backend's
+# checkout, even if the caller supplies that checkout's correct commit/tree.
+assert_preflight_failure env DB_LLVM_SOURCE_ROOT="$DB_JAVA_SOURCE_ROOT" \
+  DB_LLVM_SOURCE_COMMIT="$DB_JAVA_SOURCE_COMMIT" \
+  DB_LLVM_SOURCE_TREE="$DB_JAVA_SOURCE_TREE"
+grep -Fq 'BACKEND_SOURCE_ROOT_REUSED llvm' "$tmp/err"
+# The DB fixture repository itself is never a backend compiler checkout.
+assert_preflight_failure env DB_JAVA_SOURCE_ROOT="$tmp/repo" \
+  DB_JAVA_SOURCE_COMMIT="$DB_EXPECTED_COMMIT" \
+  DB_JAVA_SOURCE_TREE="$DB_EXPECTED_TREE"
+grep -Fq 'BACKEND_SOURCE_IS_DB_REPO java' "$tmp/err"
+# A path alias must not allow a source checkout to be silently recycled.
+ln -s "$DB_JAVA_SOURCE_ROOT" "$tmp/sources/java-alias"
+assert_preflight_failure env DB_WASM_SOURCE_ROOT="$tmp/sources/java-alias" \
+  DB_WASM_SOURCE_COMMIT="$DB_JAVA_SOURCE_COMMIT" \
+  DB_WASM_SOURCE_TREE="$DB_JAVA_SOURCE_TREE"
+echo 'HOST_PARITY_COORDINATOR_CONTRACT_PASS cases=17; MOCK EXECUTABLES ONLY; NO NATIVE GUEST EXECUTIONS'
