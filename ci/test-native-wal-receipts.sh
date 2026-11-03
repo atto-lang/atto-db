@@ -83,8 +83,8 @@ cp "$tmp/valid" "$tmp/bad"; head -c 135000 /dev/zero | tr '\0' 'x' >> "$tmp/bad"
 # Wrong argument pin must fail closed.
 if "$helper" "$tmp/valid" "$commit" "$tree" short-hash >/dev/null 2>&1; then exit 1; fi
 # The 16th high-bit forgery oracle is mandatory: no silent 15->16 credit.
-awk '/^GUEST_EXECUTED_PASS tests\\/guest\\/negative\\/frame-highbit-identity-checksums\\.ores$/ {next} {print}' "$tmp/valid" > "$tmp/bad"; must_reject
-awk '/^FIXTURE_SHA256=/ && /frame-highbit-identity-checksums\\.ores$/ {sub(/^FIXTURE_SHA256=[0-9a-f]+/, "FIXTURE_SHA256=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")} {print}' "$tmp/valid" > "$tmp/bad"; must_reject
+awk '$0 == "GUEST_EXECUTED_PASS tests/guest/negative/frame-highbit-identity-checksums.ores" {next} {print}' "$tmp/valid" > "$tmp/bad"; must_reject
+awk '/^FIXTURE_SHA256=/ && index($0, "  tests/guest/negative/frame-highbit-identity-checksums.ores") > 0 {sub(/^FIXTURE_SHA256=[0-9a-f]+/, "FIXTURE_SHA256=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")} {print}' "$tmp/valid" > "$tmp/bad"; must_reject
 # A missing 16th fixture-hash announcement is refused despite the valid summary.
-awk '/^FIXTURE_SHA256=/ && /frame-highbit-identity-checksums\\.ores$/ {next} {print}' "$tmp/valid" > "$tmp/bad"; must_reject
+awk '/^FIXTURE_SHA256=/ && index($0, "  tests/guest/negative/frame-highbit-identity-checksums.ores") > 0 {next} {print}' "$tmp/valid" > "$tmp/bad"; must_reject
 printf 'HOST_NATIVE_GUEST_RECEIPT_REJECTION_PASS negative_cases=%s; MOCK LOGS ONLY\n' "$number"
