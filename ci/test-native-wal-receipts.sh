@@ -38,12 +38,12 @@ FIXTURES
   done < "$tmp/fixtures"
   printf '%s\n' 'GUEST_WAL_CODEC_ONLY_PASS cases=16; NO AUTHENTICATION, NO DURABILITY CLAIM'
 } > "$tmp/valid"
-"$helper" "$tmp/valid" "$commit" "$tree" "$digest" > "$tmp/output"
+sh "$helper" "$tmp/valid" "$commit" "$tree" "$digest" > "$tmp/output"
 grep -q '^NATIVE_GUEST_RECEIPT_CONTRACT_PASS cases=16' "$tmp/output"
 number=0
 must_reject() {
   number=$((number+1))
-  if "$helper" "$tmp/bad" "$commit" "$tree" "$digest" > "$tmp/output" 2> "$tmp/error"; then
+  if sh "$helper" "$tmp/bad" "$commit" "$tree" "$digest" > "$tmp/output" 2> "$tmp/error"; then
     echo "HOST_RECEIPT_TEST_FAILURE case=$number" >&2
     exit 1
   fi
@@ -81,7 +81,7 @@ cp "$tmp/valid" "$tmp/bad"; printf 'unexpected-tail\n' >> "$tmp/bad"; must_rejec
 # Excessively large child output should not be trusted or scanned indefinitely.
 cp "$tmp/valid" "$tmp/bad"; head -c 135000 /dev/zero | tr '\0' 'x' >> "$tmp/bad"; must_reject
 # Wrong argument pin must fail closed.
-if "$helper" "$tmp/valid" "$commit" "$tree" short-hash >/dev/null 2>&1; then exit 1; fi
+if sh "$helper" "$tmp/valid" "$commit" "$tree" short-hash >/dev/null 2>&1; then exit 1; fi
 # The 16th high-bit forgery oracle is mandatory: no silent 15->16 credit.
 awk '$0 == "GUEST_EXECUTED_PASS tests/guest/negative/frame-highbit-identity-checksums.ores" {next} {print}' "$tmp/valid" > "$tmp/bad"; must_reject
 awk '/^FIXTURE_SHA256=/ && index($0, "  tests/guest/negative/frame-highbit-identity-checksums.ores") > 0 {sub(/^FIXTURE_SHA256=[0-9a-f]+/, "FIXTURE_SHA256=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")} {print}' "$tmp/valid" > "$tmp/bad"; must_reject
