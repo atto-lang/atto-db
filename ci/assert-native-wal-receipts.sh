@@ -1,5 +1,5 @@
 #!/bin/sh
-# Fail-closed terminal receipt validation for the 15 exact ODB1 guest fixtures.
+# Fail-closed terminal receipt validation for the 16 exact ODB1 guest fixtures.
 # This checks the native verifier's OUTPUT CONTRACT, not compiler authenticity.
 set -eu
 export LC_ALL=C
@@ -56,7 +56,7 @@ BEGIN {
     if (length(hex)!=64 || hex ~ /[^0123456789abcdef]/) invalid=1
     # Independently hash the exact pinned checkout fixture: a plausible but
     # forged 64-character checksum must not become guest-execution evidence.
-    if (fixtureCount <= 15) {
+    if (fixtureCount <= 16) {
       command="sha256sum " expected[fixtureCount]
       if ((command | getline actualHashLine) != 1 ||
           $0 != "FIXTURE_SHA256=" actualHashLine) invalid=1
