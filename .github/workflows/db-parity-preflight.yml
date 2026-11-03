@@ -10,6 +10,8 @@ on:
       - 'ci/test-wal-nonfloating-byte-pack.sh'
       - 'ci/verify-native-wal-negative-challenge.sh'
       - 'ci/test-native-wal-negative-challenge.sh'
+      - 'ci/assert-native-wal-receipts.sh'
+      - 'ci/test-native-wal-receipts.sh'
       - '.github/workflows/db-parity-preflight.yml'
 permissions:
   contents: read
@@ -31,17 +33,20 @@ jobs:
           test -z "$(git status --porcelain)"
           echo "DB_COORDINATOR_SOURCE_HEAD=$EXPECTED_HEAD"
           echo "DB_COORDINATOR_SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
-      - name: POSIX syntax and seventeen host-only coordinator contracts
+      - name: POSIX syntax, 16-case receipt forgery, and five-backend host contracts
         shell: bash
         run: |
           set -euo pipefail
           sh -n ci/verify-native-wal.sh
           sh -n ci/verify-native-wal-negative-challenge.sh
           sh -n ci/test-native-wal-negative-challenge.sh
+          sh -n ci/assert-native-wal-receipts.sh
+          sh -n ci/test-native-wal-receipts.sh
           sh -n ci/verify-five-backend-wal-parity.sh
           sh -n ci/test-five-backend-preflight.sh
           sh ci/test-five-backend-preflight.sh
           sh ci/test-wal-nonfloating-byte-pack.sh
           sh ci/test-native-wal-negative-challenge.sh
+          sh ci/test-native-wal-receipts.sh
       - name: Evidence boundary
         run: echo 'This workflow tests scripts using mocks; it does not compile or run .ores, exercise a database, or attest backend parity.'
