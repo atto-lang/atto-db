@@ -44,7 +44,10 @@ check_source_checkout() {
 seen_digests=''
 seen_source_roots=''
 db_checkout_root="$(pwd -P)"
-for phase in preflight execute; do
+# Only local stdout receipts, never a secret or untrusted status-only pass.
+receipt_dir="$(mktemp -d)"
+trap 'rm -rf "$receipt_dir"' EXIT HUP INT TERM
+for phase in preflight execute final; do
   for backend in java llvm wasm cranelift dotnet; do
     case "$backend" in
       java) bin="${DB_JAVA_COMPILER_BIN:-}"; digest="${DB_JAVA_COMPILER_SHA256:-}"
@@ -90,11 +93,46 @@ for phase in preflight execute; do
     fi
     if [ "$phase" = execute ]; then
       echo "BACKEND_ATTEMPT=$backend"
-      ORESLANG_BIN="$bin" ORESLANG_COMPILER_SHA256="$digest" \
-        sh ci/verify-native-wal.sh
+      receipt_log="$receipt_dir/$backend.log"
+      if ! ORESLANG_BIN="$bin" ORESLANG_COMPILER_SHA256="$digest" \
+          ORESLANG_BACKEND="$backend" sh ci/verify-native-wal.sh >"$receipt_log"; then
+        echo "BACKEND_GUEST_EXECUTION_FAILED $backend" >&2
+        exit 1
+      fi
+      if ! sh ci/assert-native-wal-receipts.sh "$receipt_log" \
+          "$DB_EXPECTED_COMMIT" "$DB_EXPECTED_TREE" "$digest" >/dev/null; then
+        echo "BACKEND_GUEST_RECEIPTS_INVALID $backend" >&2
+        exit 1
+      fi
+      # Reject a compiler that mutated source or its own binary while running.
+      if [ -n "$(git status --porcelain)" ] ||
+         [ "$(git rev-parse HEAD)" != "$DB_EXPECTED_COMMIT" ] ||
+         [ "$(git rev-parse 'HEAD^{tree}')" != "$DB_EXPECTED_TREE" ]; then
+        echo "ODB1_SOURCE_CHANGED_DURING_GUEST_EXECUTION $backend" >&2
+        exit 1
+      fi
+      printf '%s  %s\n' "$digest" "$bin" | sha256sum -c - >/dev/null || {
+        echo "BACKEND_COMPILER_CHANGED_DURING_EXECUTION $backend" >&2
+        exit 1
+      }
+      check_source_checkout "$source_root" "$source_commit" "$source_tree" "$backend"
+      cat "$receipt_log"
       echo "BACKEND_GUEST_CODEC_PASS=$backend cases=16"
     fi
   done
   if [ "$phase" = preflight ]; then echo 'FIVE_BACKEND_PREFLIGHT_PASS; NO GUEST EXECUTION YET'; fi
+  if [ "$phase" = final ]; then
+    # Revalidate *after* the final backend returns; zero status is insufficient.
+    test -z "$(git status --porcelain)" || {
+      echo 'DB_SOURCE_CHANGED_DURING_GUEST_RUN' >&2; exit 2;
+    }
+    test "$(git rev-parse HEAD)" = "$DB_EXPECTED_COMMIT" || {
+      echo 'DB_SOURCE_COMMIT_CHANGED_DURING_GUEST_RUN' >&2; exit 2;
+    }
+    test "$(git rev-parse 'HEAD^{tree}')" = "$DB_EXPECTED_TREE" || {
+      echo 'DB_SOURCE_TREE_CHANGED_DURING_GUEST_RUN' >&2; exit 2;
+    }
+    echo 'FIVE_BACKEND_FINAL_SOURCE_AND_BINARY_RECHECK_PASS; NOT COMPILER ATTESTATION'
+  fi
 done
 echo 'FIVE_BACKEND_ODB1_EXECUTION_CANDIDATE_PASS cases=80; NO AUTHENTICATION OR DURABILITY CLAIM'
