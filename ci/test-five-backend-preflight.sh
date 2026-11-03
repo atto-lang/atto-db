@@ -103,11 +103,6 @@ printf 'dirty\n' > "$tmp/sources/wasm/untracked"
 assert_preflight_failure env
 rm "$tmp/sources/wasm/untracked"
 assert_preflight_failure env DB_CRANELIFT_SOURCE_TREE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-# Different binary wrappers may NOT reuse an identical backend source root.
-assert_preflight_failure env \
-  DB_LLVM_SOURCE_ROOT="$DB_JAVA_SOURCE_ROOT" \
-  DB_LLVM_SOURCE_COMMIT="$DB_JAVA_SOURCE_COMMIT" \
-  DB_LLVM_SOURCE_TREE="$DB_JAVA_SOURCE_TREE"
 # Reject an identical physical backend checkout, even with different compiler binaries.
 assert_preflight_failure env \
   DB_LLVM_SOURCE_ROOT="$DB_JAVA_SOURCE_ROOT" \
