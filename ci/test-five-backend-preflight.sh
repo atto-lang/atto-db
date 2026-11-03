@@ -154,4 +154,38 @@ export DB_EXPECTED_COMMIT="$(git -C "$tmp/repo" rev-parse HEAD)"
 export DB_EXPECTED_TREE="$(git -C "$tmp/repo" rev-parse 'HEAD^{tree}')"
 assert_no_guest_credit
 grep -q 'ODB1_SOURCE_CHANGED_DURING_GUEST_EXECUTION java' "$tmp/err"
+# Last backend can corrupt *its own* source AFTER writing plausible receipts.
+# Earlier four backend receipts may be valid; final 80-case claim MUST fail.
+{
+  printf '#!/bin/sh\n'
+  printf 'if [ "${ORESLANG_BACKEND:-}" = dotnet ]; then printf "changed\\n" >> "$DB_DOTNET_SOURCE_ROOT/provenance.txt"; fi\n'
+  tail -n +2 "$tmp/valid-mock"
+} > "$tmp/repo/ci/verify-native-wal.sh"
+(cd "$tmp/repo" && git add . && git -c user.name=gate-test -c user.email=gate-test@invalid.example commit -qm 'late source mutation')
+export DB_EXPECTED_COMMIT="$(git -C "$tmp/repo" rev-parse HEAD)"
+export DB_EXPECTED_TREE="$(git -C "$tmp/repo" rev-parse 'HEAD^{tree}')"
+if (cd "$tmp/repo" && sh ci/verify-five-backend-wal-parity.sh) > "$tmp/out" 2> "$tmp/err"; then
+  echo 'FAILED: post-final-backend source mutation accepted' >&2; exit 1
+fi
+grep -q 'BACKEND_SOURCE_DIRTY dotnet' "$tmp/err"
+if grep -q '^FIVE_BACKEND_ODB1_EXECUTION_CANDIDATE_PASS' "$tmp/out"; then
+  echo 'FAILED: credited 80 cases despite dirty dotnet source' >&2; exit 1
+fi
+git -C "$tmp/sources/dotnet" checkout -- provenance.txt
+# A compiler executable changed during the last guest run is also rejected.
+{
+  printf '#!/bin/sh\n'
+  printf 'if [ "${ORESLANG_BACKEND:-}" = dotnet ]; then printf "\\n# unexpected mutation\\n" >> "$DB_DOTNET_COMPILER_BIN"; fi\n'
+  tail -n +2 "$tmp/valid-mock"
+} > "$tmp/repo/ci/verify-native-wal.sh"
+(cd "$tmp/repo" && git add . && git -c user.name=gate-test -c user.email=gate-test@invalid.example commit -qm 'late compiler mutation')
+export DB_EXPECTED_COMMIT="$(git -C "$tmp/repo" rev-parse HEAD)"
+export DB_EXPECTED_TREE="$(git -C "$tmp/repo" rev-parse 'HEAD^{tree}')"
+if (cd "$tmp/repo" && sh ci/verify-five-backend-wal-parity.sh) > "$tmp/out" 2> "$tmp/err"; then
+  echo 'FAILED: post-final-backend compiler mutation accepted' >&2; exit 1
+fi
+grep -q 'BACKEND_COMPILER_CHANGED_DURING_EXECUTION dotnet' "$tmp/err"
+if grep -q '^FIVE_BACKEND_ODB1_EXECUTION_CANDIDATE_PASS' "$tmp/out"; then
+  echo 'FAILED: credited 80 cases despite changed dotnet compiler' >&2; exit 1
+fi
 echo 'HOST_PARITY_COORDINATOR_CONTRACT_PASS; 16 fixtures, adversarial mocks only; NO NATIVE GUEST EXECUTIONS'
