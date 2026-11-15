@@ -29,6 +29,8 @@ def plan_migrations(migrations, applied=()):
         nodes[name] = set(deps)
     if type(applied) not in (tuple, list, set, frozenset):
         raise MigrationPlanError("applied must be an iterable of IDs")
+    if any(type(name) is not str for name in applied):
+        raise MigrationPlanError("applied IDs must be strings")
     applied_set = set(applied)
     if len(applied_set) != len(applied) or not applied_set <= nodes.keys():
         raise MigrationPlanError("duplicate or unknown applied migration")
