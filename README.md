@@ -37,3 +37,9 @@ This README describes the project's intended role. It does not imply that the li
 AttoLang is the public name; preserve existing Oreslang/.ores compatibility and use canonical .atto for new portable library source. This README defines scope, not feature readiness.
 
 **Acceptance:** name exact source SHA/tree, runtime/toolchain, positive and negative checks and execution receipt before claiming support. Host-only tests and empty CI steps do not prove guest execution.
+
+## Dependency migration planner (host reference only)
+
+`reference/migration_plan.py` provides a deterministic, lexical-tie-break topological sort of migration IDs and dependency edges. It rejects cycles, unknown or duplicate dependencies, invalid names, and inconsistent already-applied histories. This reference **never** connects to a database, reads credentials, opens SQL files or applies a migration. No AttoLang or database-runtime support is claimed.
+
+Run `python3 -m unittest discover -s tests -v` for host-only checks. Future implementations must add transactional locking, checksums, WAL/recovery behavior, actor-safe cancellation and per-backend execution evidence.
