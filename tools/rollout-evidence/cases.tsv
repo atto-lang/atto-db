@@ -1,0 +1,4 @@
+session-ownership	java	execution
+query-cancellation	java	execution
+driver-capability	java	execution
+negative-admission	java	rejection
