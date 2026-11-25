@@ -1,0 +1,37 @@
+// SECURITY NEGATIVE PROPERTY: Adler32 is NOT an authentication tag.
+// Three adjacent payload deltas (+1, -2, +1) preserve both Adler limbs.
+// Two different records may therefore carry identical checksum bytes.
+// Exact stdout: db:wal-adler-collision-ok. Never promote to commit proof.
+import module wal_frame from "../../../src/wal/frame";
+pub routine main(): void {
+  let List<int> key = new List<int>();
+  let List<int> value = new List<int>();
+  key.add(60); key.add(60); key.add(60); value.add(42);
+  val encoded = wal_frame.encode(7, 3, 1, 42, 1, key, value);
+  if encoded.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val original = encoded.unwrap();
+  let List<int> collision = new List<int>();
+  for (const octet of original) { collision.add(octet); }
+  collision.set(26, 61);
+  collision.set(27, 58);
+  collision.set(28, 61);
+  for (let i = original.length - 4; i < original.length; i++) {
+    if collision.get(i) != original.get(i); then
+      stdio.stdout.write("db:FAILED"); return;
+    fi
+  }
+  val first = wal_frame.decode(original);
+  val second = wal_frame.decode(collision);
+  if first.is_err() || second.is_err(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  val a = first.unwrap();
+  val b = second.unwrap();
+  if a.key.get(0) != 60 || b.key.get(0) != 61 ||
+    a.key.get(1) != 60 || b.key.get(1) != 58 ||
+    a.key.get(2) != 60 || b.key.get(2) != 61; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  stdio.stdout.write("db:wal-adler-collision-ok");
+  return;
+}

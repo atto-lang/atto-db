@@ -1,0 +1,24 @@
+// ODB1 is a binary wire format. Zero, high-bit, and 255 octets are data.
+// Exact stdout: db:wal-binary-octets-ok. Codec only; not an ACK.
+import module wal_frame from "../../../src/wal/frame";
+pub routine main(): void {
+  let List<int> key = new List<int>();
+  let List<int> value = new List<int>();
+  key.add(0); key.add(255);
+  value.add(255); value.add(0); value.add(128);
+  val packed = wal_frame.encode(7, 3, 1, 42, 1, key, value);
+  if packed.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val wire = packed.unwrap();
+  if wire.length != 35; then stdio.stdout.write("db:FAILED"); return; fi
+  val unpacked = wal_frame.decode(wire);
+  if unpacked.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val frame = unpacked.unwrap();
+  if frame.key.length != 2 || frame.value.length != 3 ||
+    frame.key.get(0) != 0 || frame.key.get(1) != 255 ||
+    frame.value.get(0) != 255 || frame.value.get(1) != 0 ||
+    frame.value.get(2) != 128; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  stdio.stdout.write("db:wal-binary-octets-ok");
+  return;
+}

@@ -1,0 +1,73 @@
+name: DB stage18 runtime lifetime WAL/ODF1 custody (host only)
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/db-lifetime-custody.yml'
+      - 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java'
+      - 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyShardRecovery.java'
+      - 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyGenerationFenceLedger.java'
+      - 'runtime/java/src/org/oreslang/db/primitive/DbShardLifetimeCustody.java'
+      - 'runtime/java/test/org/oreslang/db/primitive/ReadOnlyGenerationFenceLedgerTest.java'
+      - 'runtime/java/test/org/oreslang/db/primitive/DbShardLifetimeCustodyTest.java'
+permissions:
+  contents: read
+jobs:
+  lifetime-custody-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Verify exact PR head and 6 Git source blob hashes
+        shell: bash
+        env:
+          EXACT_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          declare -A sha=(
+            [runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java]='8da48ec37b5a2ab8cb141c2403669fce6ffb6024'
+            [runtime/java/src/org/oreslang/db/primitive/ReadOnlyShardRecovery.java]='5208e8503587eb69aeb908a62bfd223b32961583'
+            [runtime/java/src/org/oreslang/db/primitive/ReadOnlyGenerationFenceLedger.java]='3713fd611c8f5c7594aae5b2eb1b3317833c6efc'
+            [runtime/java/src/org/oreslang/db/primitive/DbShardLifetimeCustody.java]='9cef4616352ac6a24cd1db0d0cc9b6a6aa2616ab'
+            [runtime/java/test/org/oreslang/db/primitive/ReadOnlyGenerationFenceLedgerTest.java]='f739bb4d8535492bb33a291ae6b039ba39fb5482'
+            [runtime/java/test/org/oreslang/db/primitive/DbShardLifetimeCustodyTest.java]='d3eb543448e1408b7408d62ca7eb3a5976a3cbe5'
+          )
+          for file in "${!sha[@]}"; do
+            test "$(git hash-object "$file")" = "${sha[$file]}"
+          done
+          echo "SOURCE_COMMIT=$(git rev-parse HEAD)"
+          echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Compile six real sources and run exact-output OS lease tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -version
+          javac -version
+          sha256sum "$(readlink -f "$(command -v java)")" "$(readlink -f "$(command -v javac)")"
+          mkdir -p "$RUNNER_TEMP/db-stage18"
+          javac -Xlint:all -Werror -d "$RUNNER_TEMP/db-stage18" \
+            runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java \
+            runtime/java/src/org/oreslang/db/primitive/ReadOnlyShardRecovery.java \
+            runtime/java/src/org/oreslang/db/primitive/ReadOnlyGenerationFenceLedger.java \
+            runtime/java/src/org/oreslang/db/primitive/DbShardLifetimeCustody.java \
+            runtime/java/test/org/oreslang/db/primitive/ReadOnlyGenerationFenceLedgerTest.java \
+            runtime/java/test/org/oreslang/db/primitive/DbShardLifetimeCustodyTest.java
+          printf '%s\n' 'HOST_DB_LIFETIME_CUSTODY_PASS assertions=40 (real ODF1 WAL locks; NO recovered writer or guest ACK)' > "$RUNNER_TEMP/expected-custody.txt"
+          printf '%s\n' 'HOST_ODF1_GENERATION_FENCE_PASS checks=46 (durable-candidate records only; NO writer, actor runtime or guest ACK)' > "$RUNNER_TEMP/expected-odf1.txt"
+          for round in 1 2 3 4 5; do
+            timeout 50s java -cp "$RUNNER_TEMP/db-stage18" \
+              org.oreslang.db.primitive.DbShardLifetimeCustodyTest > "$RUNNER_TEMP/custody.txt"
+            cmp "$RUNNER_TEMP/expected-custody.txt" "$RUNNER_TEMP/custody.txt"
+            timeout 50s java -cp "$RUNNER_TEMP/db-stage18" \
+              org.oreslang.db.primitive.ReadOnlyGenerationFenceLedgerTest > "$RUNNER_TEMP/odf1.txt"
+            cmp "$RUNNER_TEMP/expected-odf1.txt" "$RUNNER_TEMP/odf1.txt"
+            cat "$RUNNER_TEMP/custody.txt" "$RUNNER_TEMP/odf1.txt"
+          done

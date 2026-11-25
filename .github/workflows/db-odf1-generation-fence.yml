@@ -10,6 +10,7 @@ on:
   push:
     branches:
       - 'feat/native-db-generation-fence-stage17-20261031'
+      - 'feat/native-db-lifetime-custody-stage18-20261031'
   workflow_dispatch:
 permissions:
   contents: read
@@ -33,7 +34,7 @@ jobs:
           declare -A sha=(
             [runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java]='8da48ec37b5a2ab8cb141c2403669fce6ffb6024'
             [runtime/java/src/org/oreslang/db/primitive/ReadOnlyShardRecovery.java]='5208e8503587eb69aeb908a62bfd223b32961583'
-            [runtime/java/src/org/oreslang/db/primitive/ReadOnlyGenerationFenceLedger.java]='c313446947defcfbcb3129061a2bea0d8e109b16'
+            [runtime/java/src/org/oreslang/db/primitive/ReadOnlyGenerationFenceLedger.java]='3713fd611c8f5c7594aae5b2eb1b3317833c6efc'
             [runtime/java/test/org/oreslang/db/primitive/ReadOnlyGenerationFenceLedgerTest.java]='f739bb4d8535492bb33a291ae6b039ba39fb5482'
           )
           for source in "${!sha[@]}"; do

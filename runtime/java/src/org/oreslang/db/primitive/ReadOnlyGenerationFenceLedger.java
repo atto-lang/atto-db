@@ -189,80 +189,112 @@ final class ReadOnlyGenerationFenceLedger {
       throw new InvalidFence("fence_wal_snapshot_mismatch");
   }
 
-  /** Read-only inspection. Does not close or write any supplied descriptor. */
+  /**
+   * Verify a runtime-held exclusive OS lease on the actual supplied channels.
+   * Never accept a lock from a different FileChannel. No guest access.
+   */
+  private static void requireHeld(FileChannel wal, FileChannel a, FileChannel b,
+                                  FileLock wLock, FileLock aLock, FileLock bLock) {
+    checkChannels(wal, a, b);
+    if (wLock == null || aLock == null || bLock == null ||
+        wLock.channel() != wal || aLock.channel() != a || bLock.channel() != b ||
+        !wLock.isValid() || !aLock.isValid() || !bLock.isValid() ||
+        wLock.isShared() || aLock.isShared() || bLock.isShared())
+      throw new SecurityException("not under current exclusive runtime file leases");
+  }
+
+  /** Read-only diagnostic. Acquires and releases three temporary OS locks. */
   static Candidate inspect(FileChannel wal, FileChannel slotA, FileChannel slotB,
                            ShardKey trusted) throws IOException {
     Objects.requireNonNull(trusted);
     checkChannels(wal, slotA, slotB);
     try (Leases leases = new Leases(wal, slotA, slotB)) {
-      if (!leases.held()) throw new SecurityException("lost metadata/WAL lease");
-      var recovery = ReadOnlyShardRecovery.inspectPreopened(wal, trusted.tenant());
-      var scan = ReadOnlyWalReplay.inspectPreopened(wal, trusted.tenant());
-      if (!Arrays.equals(recovery.snapshotSha256(), scan.snapshotSha256()))
-        throw new InvalidFence("wal_changed_during_recovery");
-      Candidate a = readSlot(slotA, trusted, 'A');
-      Candidate b = readSlot(slotB, trusted, 'B');
-      Candidate selected = latest(a,b);
-      if (selected == null) throw new InvalidFence("uninitialized_generation_ledger");
-      matchingWal(selected,scan);
-      return selected;
+      return inspectWithHeldLeases(wal,slotA,slotB,trusted,
+          leases.walLock,leases.aLock,leases.bLock);
     }
   }
 
-  /**
-   * Stage 17 ONLY: writes a candidate durable fence, NOT a write activation.
-   * Preopened descriptors and host ID must be independently authenticated.
-   * If any step fails, no automatic retry, repair, truncation, or ACK is safe.
-   */
+  /** Runtime-held locks stay live AFTER returning, preventing an ownership gap. */
+  static Candidate inspectWithHeldLeases(FileChannel wal, FileChannel slotA,
+      FileChannel slotB, ShardKey trusted, FileLock walLock, FileLock aLock,
+      FileLock bLock) throws IOException {
+    Objects.requireNonNull(trusted);
+    requireHeld(wal,slotA,slotB,walLock,aLock,bLock);
+    var recovery = ReadOnlyShardRecovery.inspectPreopened(wal, trusted.tenant());
+    var scan = ReadOnlyWalReplay.inspectPreopened(wal, trusted.tenant());
+    if (!Arrays.equals(recovery.snapshotSha256(), scan.snapshotSha256()))
+      throw new InvalidFence("wal_changed_during_recovery");
+    Candidate a = readSlot(slotA, trusted, 'A');
+    Candidate b = readSlot(slotB, trusted, 'B');
+    Candidate selected = latest(a,b);
+    if (selected == null) throw new InvalidFence("uninitialized_generation_ledger");
+    matchingWal(selected,scan);
+    return selected;
+  }
+
+  /** Stage17 provisional fence recording; lock release after return. */
   static Candidate recordCandidate(FileChannel wal, FileChannel slotA,
                                    FileChannel slotB, ShardKey trusted,
                                    int proposedGeneration) throws IOException {
     Objects.requireNonNull(trusted);
     checkChannels(wal, slotA, slotB);
+    try (Leases leases = new Leases(wal,slotA,slotB)) {
+      return recordWithHeldLeases(wal,slotA,slotB,trusted,proposedGeneration,
+          leases.walLock,leases.aLock,leases.bLock);
+    }
+  }
+
+  /**
+   * Record a provisional ODF1 candidate while caller RETAINS all three locks.
+   * No permission to open a WAL writer or ACK; directory fsync remains separate.
+   */
+  static Candidate recordWithHeldLeases(FileChannel wal, FileChannel slotA,
+      FileChannel slotB, ShardKey trusted, int proposedGeneration,
+      FileLock walLock, FileLock aLock, FileLock bLock) throws IOException {
+    Objects.requireNonNull(trusted);
+    requireHeld(wal,slotA,slotB,walLock,aLock,bLock);
     if (proposedGeneration <= 0)
       throw new IllegalArgumentException("invalid proposed generation");
-    try (Leases leases = new Leases(wal,slotA,slotB)) {
-      if (!leases.held()) throw new SecurityException("lost metadata/WAL lease");
-      var recovery = ReadOnlyShardRecovery.inspectPreopened(wal,trusted.tenant());
-      var scan = ReadOnlyWalReplay.inspectPreopened(wal,trusted.tenant());
-      if (!Arrays.equals(recovery.snapshotSha256(), scan.snapshotSha256()))
-        throw new InvalidFence("wal_changed_during_recovery");
-      Candidate a = readSlot(slotA,trusted,'A');
-      Candidate b = readSlot(slotB,trusted,'B');
-      Candidate previous = latest(a,b);
-      matchingWal(previous,scan);
-      if (proposedGeneration <= scan.lastGeneration() ||
-          (previous != null && proposedGeneration <= previous.generation()))
-        throw new RejectedExecutionException("stale proposed generation");
-      if (previous != null && previous.counter() == Long.MAX_VALUE)
-        throw new RejectedExecutionException("generation ledger counter exhausted");
-      if (scan.lastSequence() == Integer.MAX_VALUE)
-        throw new RejectedExecutionException("WAL sequence exhausted");
-      char nextSlot = previous == null || previous.slot() == 'B' ? 'A' : 'B';
-      Candidate next = new Candidate(trusted, proposedGeneration,
-          previous == null ? 0 : previous.generation(),
-          previous == null ? 1 : previous.counter() + 1,
-          scan.lastGeneration(),scan.lastSequence(),(int)scan.bytesChecked(),
-          scan.records().size(),scan.snapshotSha256(),operationDigest(scan),nextSlot);
-      FileChannel target = nextSlot == 'A' ? slotA : slotB;
-      byte[] record = serialize(next);
-      ByteBuffer data = ByteBuffer.wrap(record);
-      long offset = 0;
-      while (data.hasRemaining()) {
-        int written = target.write(data,offset);
-        if (written <= 0) throw new IOException("stalled_fence_slot_write");
-        offset += written;
-      }
-      // data-only fsync is insufficient for metadata and allocation changes.
-      target.force(true);
-      Candidate verified = readSlot(target,trusted,nextSlot);
-      if (verified == null || !same(next, verified))
-        throw new InvalidFence("fence_write_readback_mismatch");
-      // Validate WAL again under retained lease; no mutation during publication.
-      var after = ReadOnlyWalReplay.inspectPreopened(wal,trusted.tenant());
-      matchingWal(verified, after);
-      return verified;
+    var recovery = ReadOnlyShardRecovery.inspectPreopened(wal,trusted.tenant());
+    var scan = ReadOnlyWalReplay.inspectPreopened(wal,trusted.tenant());
+    if (!Arrays.equals(recovery.snapshotSha256(), scan.snapshotSha256()))
+      throw new InvalidFence("wal_changed_during_recovery");
+    Candidate a = readSlot(slotA,trusted,'A');
+    Candidate b = readSlot(slotB,trusted,'B');
+    Candidate previous = latest(a,b);
+    matchingWal(previous,scan);
+    if (proposedGeneration <= scan.lastGeneration() ||
+        (previous != null && proposedGeneration <= previous.generation()))
+      throw new RejectedExecutionException("stale proposed generation");
+    if (previous != null && previous.counter() == Long.MAX_VALUE)
+      throw new RejectedExecutionException("generation ledger counter exhausted");
+    if (scan.lastSequence() == Integer.MAX_VALUE)
+      throw new RejectedExecutionException("WAL sequence exhausted");
+    char nextSlot = previous == null || previous.slot() == 'B' ? 'A' : 'B';
+    Candidate next = new Candidate(trusted, proposedGeneration,
+        previous == null ? 0 : previous.generation(),
+        previous == null ? 1 : previous.counter() + 1,
+        scan.lastGeneration(),scan.lastSequence(),(int)scan.bytesChecked(),
+        scan.records().size(),scan.snapshotSha256(),operationDigest(scan),nextSlot);
+    FileChannel target = nextSlot == 'A' ? slotA : slotB;
+    byte[] record = serialize(next);
+    ByteBuffer data = ByteBuffer.wrap(record);
+    long offset = 0;
+    while (data.hasRemaining()) {
+      int written = target.write(data,offset);
+      if (written <= 0) throw new IOException("stalled_fence_slot_write");
+      offset += written;
     }
+    // Metadata changes must reach the OS; directory sync is NOT established.
+    target.force(true);
+    Candidate verified = readSlot(target,trusted,nextSlot);
+    if (verified == null || !same(next, verified))
+      throw new InvalidFence("fence_write_readback_mismatch");
+    // Validate WAL again under the *still held* lifetime lock.
+    var after = ReadOnlyWalReplay.inspectPreopened(wal,trusted.tenant());
+    matchingWal(verified, after);
+    requireHeld(wal,slotA,slotB,walLock,aLock,bLock);
+    return verified;
   }
 
   private static boolean same(Candidate x, Candidate y) {
