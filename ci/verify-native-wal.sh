@@ -70,5 +70,6 @@ run_case tests/guest/positive/frame-adler-collision.ores db:wal-adler-collision-
 run_case tests/guest/positive/frame-operation-is-not-dedup.ores db:wal-codec-not-dedup-ok
 run_case tests/guest/negative/frame-trailer-each-byte.ores db:wal-trailer-corruption-ok
 run_case tests/guest/positive/frame-u16-length-endian.ores db:wal-u16-endian-ok
-test "$completed_cases" -eq 15 || { echo 'incomplete guest codec corpus' >&2; exit 1; }
-echo 'GUEST_WAL_CODEC_ONLY_PASS cases=15; NO AUTHENTICATION, NO DURABILITY CLAIM'
+run_case tests/guest/negative/frame-highbit-identity-checksums.ores db:wal-highbit-identity-checksums-ok
+test "$completed_cases" -eq 16 || { echo 'incomplete guest codec corpus' >&2; exit 1; }
+echo 'GUEST_WAL_CODEC_ONLY_PASS cases=16; NO AUTHENTICATION, NO DURABILITY CLAIM'

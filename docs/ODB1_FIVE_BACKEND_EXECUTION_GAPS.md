@@ -8,7 +8,7 @@ The source in `src/wal/frame.ores` and its positive/negative guest tests require
 - imported `wal_frame` modules and exported names;
 - `class Frame`, `List<int>` allocation/index/mutation and `Result<T,String>` / `Ok` / `Err`;
 - loops, branches, helper functions, comparisons, exact signed 32-bit byte operations (including `>> 8`), and bounded Adler-style A/B checksum limbs;
-- guest `stdio.stdout.write`, with **exact, newline-free string output** for the 15-case parity runner;
+- guest `stdio.stdout.write`, with **exact, newline-free string output** for the 16-case parity runner;
 - compiler entrypoints implementing `--check <path>` and `<path>` directly, **or** separately vetted per-backend CLI adapters that implement this exact contract, with source/launch provenance.
 
 The native parity driver requires independent, SHA-256-pinned compiler executables and a clean, pinned Git checkout for each backend. It rejects missing/duplicate binaries and must run *all* native guests, not a source-free shell mock.
@@ -17,7 +17,7 @@ The native parity driver requires independent, SHA-256-pinned compiler executabl
 
 | Backend | Source repo documented capability | Blocker for this ODB1 guest | Needed next gate |
 | --- | --- | --- | --- |
-| Java/GraalVM | Reference implementation with nominal classes, actor support, package/stdlib APIs | No complete exact-head 15-fixture native guest receipt supplied to this PR | Independently built compiler with pinned SHA and exact `--check` / run output for every ODB1 case |
+| Java/GraalVM | Reference implementation with nominal classes, actor support, package/stdlib APIs | No complete exact-head 16-fixture native guest receipt supplied to this PR | Independently built compiler with pinned SHA and exact `--check` / run output for every ODB1 case |
 | LLVM native | Tested but explicitly incomplete source-to-LLVM/AOT backend | Complete ODB1 corpus and guest I/O behavior not demonstrated | Native full-source compile/run with ABI, stdout and checksum golden bytes matched |
 | WASM | Bridge invokes **external LLVM compiler**; accepted core-Wasm ABI is **pure `() -> i64`**, zero imports; no guest host I/O | `stdio.stdout.write` and the current full guest API cannot run using this ABI; the bridge is **not an independently implemented Oreslang compiler** | Explicit portable result-buffer ABI or restricted stdout-free codec contract, with real wasm32 artifact verification and separate provenance of LLVM compiler |
 | Cranelift | `main` with 0–4 `int` parameters; checked signed-i64 constants and limited arithmetic. Explicitly rejects imports, helper calls, classes, loops and control flow | Cannot parse `wal_frame` module, `Frame`, `List<int>`, `Result` or test loops | Implement/test the required frontend/IR/runtime features independently, or restrict shared parity to a **separately labeled scalar subset** |
@@ -47,3 +47,24 @@ These tests are necessary but insufficient: even a metamorphic challenge is not 
 5. **End-to-end DB**: separately verify WAL owner capability, fsync, checkpoint directory sync, process/power fault boundaries, durable operation reconciliation, and actor-turn publication. These are not proved by any codec fixture.
 
 Any PR/source-org CI job with `runner_id=null` and `steps=[]` provides **zero executable evidence**. The private-source cross-org transfer approval remains tracked by [issue #15](https://github.com/ores-truffle-oreslang/oreslang-db/issues/15); a successful source-free alternate runner does not authorize transfer of OresDB files.
+
+## Stage-35 checksum-valid identity forgery and source isolation extension
+
+The native ODB1 matrix now requires **16 byte-exact guest cases per backend**
+(80 executions across five independently attested backends), plus the
+metamorphic syntax challenge. Added `tests/guest/negative/frame-highbit-identity-checksums.ores`,
+which independently verifies four recomputed Adler32 footer vectors and then
+requires `wal_frame.decode` to reject a set high bit for each signed-i31 field:
+tenant, generation, sequence, and operation ID. This specifically tests
+rejection before signed-int32 multiplication, not a failed checksum.
+
+The coordinator's host-only tests now also reject aliasing a backend compiler
+source checkout under another backend label, including symlink paths, and using
+the DB test repository itself as a compiler source. All five backend source
+checkouts must be separately pinned and physically distinct. **A distinct path
+and matching Git SHA do not authenticate a compiler binary or prove execution.**
+
+Only independently verified real Oreslang compiler runs can promote any of the
+80 guest outcomes. The shell test itself is mock-only; no ODB1 guest, WAL sync,
+physical persistence, Raft, actors, or five-backend DB semantics are validated
+by running it. The limitations above continue to apply.

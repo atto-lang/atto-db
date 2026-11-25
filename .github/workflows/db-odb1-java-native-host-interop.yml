@@ -1,0 +1,48 @@
+name: OresDB ODB1 Java and native C++ wire interop (host only)
+on:
+  pull_request:
+    paths:
+      - 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java'
+      - 'runtime/java/test/org/oreslang/db/primitive/Odb1JavaWireInterop.java'
+      - 'runtime/llvm/test/odb1_wire_interop.cpp'
+      - 'ci/verify-odb1-java-llvm-host-interop.sh'
+      - '.github/workflows/db-odb1-java-native-host-interop.yml'
+  push:
+    branches:
+      - 'test/odb1-real-java-native-host-wire-parity-20261103'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  java-21-native-wire-parity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Exact PR head and compiler provenance
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain)"
+          echo "DB_SOURCE_HEAD=$EXPECTED_HEAD"
+          echo "DB_SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
+          java -version
+          clang++ --version | head -n 1
+          g++ --version | head -n 1
+      - name: Compile and execute real Java and native C++ host WAL readers
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n ci/verify-odb1-java-llvm-host-interop.sh
+          bash ci/verify-odb1-java-llvm-host-interop.sh
+      - name: Explicit evidence boundary
+        run: echo 'Java production WAL replay and C++ test-host executable ran; this is NOT a Java Oreslang guest compiler or LLVM Oreslang backend execution pass.'
