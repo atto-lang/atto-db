@@ -1,0 +1,11 @@
+# Stage20 — immutable snapshot of host shadow request buffers
+
+The stage20 `VerifiedShadowWalResumption.stageFreshFixture` previously read caller-owned mutable `byte[] key`/`value` several times: first through ODR1 `reconcile`, later through ODB1 frame construction and post-sync comparison. A callback or concurrent caller mutation between those reads could change the candidate request. It was a source-contract correctness/security hazard even though the stage20 shadow is diagnostic-only.
+
+The method now clones both buffers **immediately after non-null checks**, before any external runtime/lock/custody work, and uses those same snapshots for bounds validation, ODR1 reconciliation, the appended frame, and the post-sync identity check. It does not claim atomicity if a caller races with the initial clone itself; production guests must provide frozen immutable request values. The shadow remains test-only: `canResumeWrites` and `canAcknowledgeGuest` stay false.
+
+The expanded integration regression uses a nonowning delegated `FileChannel` view whose `tryLock` deterministically mutates original caller arrays from 'm'/'z' to 'X'/'Y' **after** function admission but before its evidence and WAL path. It checks that the mutation happened, yet recovered ODB1 candidate retained original 'm'/'z', source WAL is unchanged, and no client ACK or write authority was conferred. Existing 129th-key fail-closed regression remains.
+
+Evidence: The helper `FileChannel` interception structure independently **compiled** with local OpenJDK 21.0.12.1 using `javac -Xlint:all -Werror` and **executed** one real-file tryLock mutation test. That is a helper-only test; the **full seven-source OresDB integration suite at this exact PR head has NOT executed** in this turn. The exact-blob workflow now expects 22 host assertions ×5, with Git SHA pins, but hosted runner admission previously failed `steps=[]`; never count that as test failure/pass. Native Oreslang guest, authenticated runtime storage grant, live append/restart, committed ACK, durable idempotency and LLVM remain unverified.
+
+No private source transferred cross-org. Independent non-author authorization in issue #15 required for an alternate-org test mirror. Keep draft, unmerged, unreleased.

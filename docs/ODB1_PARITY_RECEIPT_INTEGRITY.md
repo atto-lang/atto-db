@@ -1,0 +1,29 @@
+# Historical ODB1 receipt-integrity proposal (15-case predecessor)
+
+> Superseded implementation: the integrated 16-case gate in [ODB1_UNIFIED_16CASE_EVIDENCE_GATE.md](ODB1_UNIFIED_16CASE_EVIDENCE_GATE.md) preserves the ordered receipts, independent rehashing, unique source roots and post-run checks described below, and adds the sixteenth fixture. The older 15-case implementation is not reintroduced. Hosted host-only CI run [45546818390](https://github.com/atto-lang/atto-db/actions/runs/45546818390) executed the integrated tests. Native Atto guest execution remains NOT_EXECUTED. The original text is retained below for audit history, not as the current gate.
+
+# ODB1 five-backend receipt integrity hardening
+
+**Scope:** this patch hardens the **verification harness**, not Oreslang guest implementations, backend compiler binaries, WAL durability, recovered append, or guest ACK. The prior coordinator performed SHA and source-root preflight but credited `BACKEND_GUEST_CODEC_PASS` immediately after a child `verify-native-wal.sh` exited zero. A truncated or early-success child output could receive false positive credit.
+
+## Boundaries
+
+- `ci/assert-native-wal-receipts.sh` requires the supplied exact OresDB **commit**, **tree**, and **individual compiler binary SHA-256** to appear exactly once; the exact 15 guest fixture paths must appear in the **ordered** `FIXTURE_SHA256` and `GUEST_EXECUTED_PASS` lines. It recomputes each exact fixture SHA-256 from the pinned checkout and rejects mismatched checksums, missing, repeated, reordered, malformed or extra success lines; requires exactly one matching terminal `GUEST_WAL_CODEC_ONLY_PASS cases=15`; and caps output at 128 KiB. Any trailing lines after terminal success are denied.
+- `ci/verify-five-backend-wal-parity.sh` now captures each native child stdout and validates it **before** assigning any per-backend credit. It preflights physical source-root **uniqueness**, in addition to previously required independently pinned compiler paths/digests and exact git roots/commit/tree. After each child, it revalidates the OresDB checkout and backend source checkout before any per-backend credit, closing the fixture-mutation-after-hash hole. Failures still refuse global five-backend credit.
+- `ci/test-native-wal-receipts.sh` supplies **synthetic mock logs** to exercise 17 explicit adversarial rejects and one accepted valid-shape receipt. These tests DO NOT invoke a compiler or prove guest behavior. The existing `ci/test-five-backend-preflight.sh` uses an explicit mock child with 15 well-formed receipts, adds source checkout reuse rejection, and verifies that a summary-only child exit zero and a mock that modifies a guest fixture before hashing it cannot gain backend credit.
+- The host-only GitHub workflow invokes both shell tests and POSIX syntax preflight. **If Actions has zero runner steps, hosted verification remains unexecuted.**
+
+### Executed local evidence
+
+The new receipt helper and its exact GitHub-matching test file, GNU awk and `/bin/sh`, were executed **five rounds**, each yielding `HOST_NATIVE_GUEST_RECEIPT_REJECTION_PASS negative_cases=17; MOCK LOGS ONLY` (**85/85 malformed-case rejections**, plus one correctly shaped synthetic success each round). Both files' local `git hash-object` values match GitHub's returned blob SHAs:
+
+- `ci/assert-native-wal-receipts.sh`: `8ff5464c4ac2046ad756ffb92c0ec489bfeb454a`
+- `ci/test-native-wal-receipts.sh`: `a637ddd072ace3388b195e26f70a62147120a581`
+
+The exact GitHub-matching modified coordinator ran locally under a separate mock 5-source-repository harness: correctly shaped mock receipts pass, a summary-only success is rejected without guest credit, duplicate physical source checkout fails before any attempt, and a compiler that edits a guest fixture then computes a valid checksum is rejected before guest credit. These four integrated scenarios are **HOST-ONLY**. The repository's own upgraded `ci/test-five-backend-preflight.sh` is committed but awaits hosted exact-head execution. The integrated coordinator/workflow are **not yet verified by a hosted runner**. Do not claim all 75 guest cells passed. The existing coordinator's mock test remains explicitly a **host-only test**.
+
+### Parity and promotion
+
+Every real Java, LLVM, WASM, Cranelift, and .NET backend cell must separately supply an executable compiled from independently verified source/commit/tree, SHA-256 pin, clean source checkout, `--check` and actual guest execution of the 15 unchanged `.ores` fixtures with verified receipts and stdout. The coordinator is not a runtime attestation scheme by itself: even correctly shaped textual receipts can be manufactured by a malicious adapter. Trusted artifact provenance and native execution are separate release gates.
+
+The OresDB source organization has repeatedly failed Actions **before runner assignment**. The alternate private `zed-pkg/zed-docs` runner has passed a source-free probe, but [security issue #15](https://github.com/ores-truffle-oreslang/oreslang-db/issues/15) lacks independent cross-org private-source transfer approval. Do not copy any OresDB Git blobs to another organization without scope-pinned independent reviewer authorization. Keep this patch draft until live exact-head CI proves it and source/guest parity remains separately gated.

@@ -1,0 +1,40 @@
+// ODB1 key/value and DELETE exact length boundaries, no physical I/O.
+// Exact stdout: db:wal-size-matrix-ok.
+import module wal_frame from "../../../src/wal/frame";
+pub routine main(): void {
+  let List<int> small = new List<int>();
+  let List<int> full_key = new List<int>();
+  let List<int> extra_key = new List<int>();
+  let List<int> full_value = new List<int>();
+  let List<int> extra_value = new List<int>();
+  let List<int> empty = new List<int>();
+  small.add(107);
+  for (let i = 0; i < 64; i++) { full_key.add(97); }
+  for (let i = 0; i < 65; i++) { extra_key.add(97); }
+  for (let i = 0; i < 1024; i++) { full_value.add(98); }
+  for (let i = 0; i < 1025; i++) { extra_value.add(98); }
+  val zero_value_put = wal_frame.encode(7,3,1,42,1,small,empty);
+  val max_value_put = wal_frame.encode(7,3,2,43,1,full_key,full_value);
+  val min_delete = wal_frame.encode(7,3,3,44,2,small,empty);
+  if zero_value_put.is_err() || max_value_put.is_err() ||
+    min_delete.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val zero_wire = zero_value_put.unwrap();
+  val max_wire = max_value_put.unwrap();
+  val delete_wire = min_delete.unwrap();
+  if zero_wire.length != 31 ||
+    max_wire.length != 1118 ||
+    delete_wire.length != 31; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  if wal_frame.decode(zero_wire).is_err() ||
+    wal_frame.decode(max_wire).is_err() ||
+    wal_frame.decode(delete_wire).is_err() ||
+    !wal_frame.encode(7,3,4,45,1,extra_key,empty).is_err() ||
+    !wal_frame.encode(7,3,4,45,1,small,extra_value).is_err() ||
+    !wal_frame.encode(7,3,4,45,2,small,small).is_err() ||
+    !wal_frame.encode(7,3,4,45,1,empty,empty).is_err(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  stdio.stdout.write("db:wal-size-matrix-ok");
+  return;
+}

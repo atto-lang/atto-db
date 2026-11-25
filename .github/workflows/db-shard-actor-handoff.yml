@@ -1,0 +1,70 @@
+name: DB host actor-turn WAL handoff (NOT native Oreslang guest)
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/db-shard-actor-handoff.yml'
+      - 'runtime/java/src/org/oreslang/db/primitive/WalFilePrimitive.java'
+      - 'runtime/java/src/org/oreslang/db/primitive/WalRuntimeGrant.java'
+      - 'runtime/java/src/org/oreslang/db/primitive/WalActorContinuationGate.java'
+      - 'runtime/java/src/org/oreslang/db/primitive/ShardPublicationGate.java'
+      - 'runtime/java/src/org/oreslang/db/primitive/ShardActorHandoffBridge.java'
+      - 'runtime/java/test/org/oreslang/db/primitive/ShardActorHandoffBridgeTest.java'
+permissions:
+  contents: read
+jobs:
+  host-actor-turn:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Verify exact SHA-pinned production host files
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          declare -A files=(
+            [runtime/java/src/org/oreslang/db/primitive/WalFilePrimitive.java]='044af806aefbffeb6ad440d403a10aa6b0e569aa'
+            [runtime/java/src/org/oreslang/db/primitive/WalRuntimeGrant.java]='406b0713dd621308f674eeee7bc403844f2df4e4'
+            [runtime/java/src/org/oreslang/db/primitive/WalActorContinuationGate.java]='402bf509c31a853ff16bf73a3c2687780225f153'
+            [runtime/java/src/org/oreslang/db/primitive/ShardPublicationGate.java]='9f24f06632494e0df063b0d8a6bcb1f3bb944f7b'
+            [runtime/java/src/org/oreslang/db/primitive/ShardActorHandoffBridge.java]='b53212362ac3382c652b12973d4cc09280cb0f64'
+            [runtime/java/test/org/oreslang/db/primitive/ShardActorHandoffBridgeTest.java]='094e4b66a112e0f65947fb15c23165d4ab4f7557'
+          )
+          for file in "${!files[@]}"; do
+            test "$(git hash-object "$file")" = "${files[$file]}"
+          done
+          echo "SOURCE_COMMIT=$(git rev-parse HEAD)"
+          echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Strict compile and real-file serialized actor-turn replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -version
+          javac -version
+          sha256sum "$(readlink -f "$(command -v java)")" "$(readlink -f "$(command -v javac)")"
+          mkdir -p "$RUNNER_TEMP/shard-actor-handoff"
+          javac -Xlint:all -Werror -d "$RUNNER_TEMP/shard-actor-handoff" \
+            runtime/java/src/org/oreslang/db/primitive/WalFilePrimitive.java \
+            runtime/java/src/org/oreslang/db/primitive/WalRuntimeGrant.java \
+            runtime/java/src/org/oreslang/db/primitive/WalActorContinuationGate.java \
+            runtime/java/src/org/oreslang/db/primitive/ShardPublicationGate.java \
+            runtime/java/src/org/oreslang/db/primitive/ShardActorHandoffBridge.java \
+            runtime/java/test/org/oreslang/db/primitive/ShardActorHandoffBridgeTest.java
+          printf '%s\n' 'HOST_SHARD_ACTOR_HANDOFF_PASS (host actor-turn harness; NOT Oreslang guest or durable ACK)' > "$RUNNER_TEMP/expected.txt"
+          for round in 1 2 3 4 5; do
+            timeout 60s java -cp "$RUNNER_TEMP/shard-actor-handoff" \
+              org.oreslang.db.primitive.ShardActorHandoffBridgeTest \
+              > "$RUNNER_TEMP/actual.txt"
+            cmp "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt"
+            cat "$RUNNER_TEMP/actual.txt"
+          done

@@ -1,0 +1,86 @@
+// Negative pure candidate-index oracle. No guest commits or disk I/O.
+import module wal_frame from "../../../src/wal/frame";
+import module db_candidate_index from "../../../src/shard/candidate_index";
+pub routine main(): void {
+  let mut index = db_candidate_index.new_candidate_index(7);
+  let List<int> key = new List<int>();
+  let List<int> value = new List<int>();
+  key.add(107); value.add(118);
+  let first = wal_frame.encode(7, 3, 1, 100, 1, key, value);
+  let gap = wal_frame.encode(7, 3, 2, 101, 1, key, value);
+  let foreign = wal_frame.encode(8, 3, 1, 101, 1, key, value);
+  if first.is_err() || gap.is_err() || foreign.is_err(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  val first_bytes = first.unwrap();
+  val gap_bytes = gap.unwrap();
+  let List<int> corrupted = new List<int>();
+  for (const b of first_bytes) { corrupted.add(b); }
+  corrupted.set(26, 0);
+  if index.apply_candidate(gap_bytes).is_ok() ||
+    index.apply_candidate(foreign.unwrap()).is_ok() ||
+    index.apply_candidate(corrupted).is_ok() ||
+    index.last_record_sequence() != 0 ||
+    index.accepted_records() != 0 ||
+    index.key_slot_count() != 0 ||
+    index.candidate_get(key).is_ok(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  if index.apply_candidate(first_bytes).is_err(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  let duplicate = wal_frame.encode(7, 3, 2, 100, 2, key, new List<int>());
+  let regressed = wal_frame.encode(7, 2, 2, 102, 2, key, new List<int>());
+  let wrong_seq = wal_frame.encode(7, 3, 3, 102, 2, key, new List<int>());
+  if duplicate.is_err() || regressed.is_err() || wrong_seq.is_err(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  if index.apply_candidate(duplicate.unwrap()).is_ok() ||
+    index.apply_candidate(regressed.unwrap()).is_ok() ||
+    index.apply_candidate(wrong_seq.unwrap()).is_ok() ||
+    index.last_record_sequence() != 1 ||
+    index.accepted_records() != 1 ||
+    index.retained_value_bytes() != 1 ||
+    index.can_acknowledge(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  if index.apply_candidate(gap_bytes).is_err() ||
+    index.last_record_sequence() != 2; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+
+  // The 128th distinct key succeeds; the 129th is rejected without
+  // consuming sequence/op identity, allowing a valid rewrite at that seq.
+  let mut bounded = db_candidate_index.new_candidate_index(7);
+  for (let i = 0; i < 128; i++) {
+    let List<int> k = new List<int>();
+    k.add(i);
+    let rec = wal_frame.encode(7, 3, i + 1, i + 1000, 1, k, value);
+    if rec.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+    if bounded.apply_candidate(rec.unwrap()).is_err(); then
+      stdio.stdout.write("db:FAILED"); return;
+    fi
+  }
+  let List<int> overflow_key = new List<int>();
+  overflow_key.add(128);
+  let overflow = wal_frame.encode(7, 3, 129, 1128, 1, overflow_key, value);
+  if overflow.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  if bounded.apply_candidate(overflow.unwrap()).is_ok() ||
+    bounded.key_slot_count() != 128 ||
+    bounded.accepted_records() != 128 ||
+    bounded.last_record_sequence() != 128; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  let List<int> first_key = new List<int>();
+  first_key.add(0);
+  let rewrite = wal_frame.encode(7, 3, 129, 1128, 1, first_key, value);
+  if rewrite.is_err() || bounded.apply_candidate(rewrite.unwrap()).is_err() ||
+    bounded.accepted_records() != 129 ||
+    bounded.key_slot_count() != 128 ||
+    bounded.last_record_sequence() != 129 ||
+    bounded.can_acknowledge(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  stdio.stdout.write("db:candidate-index-rejections-ok");
+  return;
+}

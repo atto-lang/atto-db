@@ -1,0 +1,27 @@
+// ODB1 key and value lengths are independent little-endian u16 fields.
+// For key=64, value=256, expect bytes [64,0] [0,1] and length=350.
+// Exact stdout: db:wal-u16-endian-ok.
+import module wal_frame from "../../../src/wal/frame";
+pub routine main(): void {
+  let List<int> key = new List<int>();
+  let List<int> value = new List<int>();
+  for (let i = 0; i < 64; i++) { key.add(i); }
+  for (let i = 0; i < 256; i++) { value.add(i); }
+  val encoded = wal_frame.encode(7, 3, 1, 42, 1, key, value);
+  if encoded.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val wire = encoded.unwrap();
+  if wire.length != 350 ||
+    wire.get(22) != 64 || wire.get(23) != 0 ||
+    wire.get(24) != 0 || wire.get(25) != 1; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  val decoded = wal_frame.decode(wire);
+  if decoded.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val frame = decoded.unwrap();
+  if frame.key.length != 64 || frame.value.length != 256 ||
+    frame.key.get(63) != 63 || frame.value.get(255) != 255; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  stdio.stdout.write("db:wal-u16-endian-ok");
+  return;
+}

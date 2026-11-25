@@ -1,0 +1,50 @@
+// Boundary oracle: ODB1 1 MiB total WAL byte budget, candidate-only.
+import module wal_frame from "../../../src/wal/frame";
+import module db_candidate_index from "../../../src/shard/candidate_index";
+pub routine main(): void {
+  let mut index = db_candidate_index.new_candidate_index(7);
+  let List<int> key = new List<int>();
+  let List<int> value = new List<int>();
+  for (let i = 0; i < 64; i++) { key.add(i); }
+  for (let i = 0; i < 1024; i++) { value.add(97); }
+
+  // 937 x 1118 B = 1047566 B. The next maximum-sized record exceeds
+  // 1048576 bytes. Each operation ID is distinct; same key is overwritten.
+  for (let i = 0; i < 937; i++) {
+    let frame = wal_frame.encode(7, 3, i + 1, i + 5000, 1, key, value);
+    if frame.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+    if index.apply_candidate(frame.unwrap()).is_err(); then
+      stdio.stdout.write("db:FAILED"); return;
+    fi
+  }
+  if index.inspected_wal_bytes() != 1047566 ||
+    index.accepted_records() != 937 ||
+    index.key_slot_count() != 1 ||
+    index.retained_value_bytes() != 1024; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  let oversized = wal_frame.encode(7, 3, 938, 5937, 1, key, value);
+  if oversized.is_err() || index.apply_candidate(oversized.unwrap()).is_ok() ||
+    index.inspected_wal_bytes() != 1047566 ||
+    index.accepted_records() != 937 ||
+    index.last_record_sequence() != 937; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  // A smaller legal frame at the SAME seq and operation ID must still pass.
+  // Rejection cannot consume identity or corrupt the index's 1 MiB budget.
+  let List<int> small_key = new List<int>();
+  let List<int> small_val = new List<int>();
+  small_key.add(107); small_val.add(118);
+  let small = wal_frame.encode(7, 3, 938, 5937, 1, small_key, small_val);
+  if small.is_err() || index.apply_candidate(small.unwrap()).is_err() ||
+    index.inspected_wal_bytes() != 1047598 ||
+    index.accepted_records() != 938 ||
+    index.last_record_sequence() != 938 ||
+    index.key_slot_count() != 2 ||
+    index.retained_value_bytes() != 1025 ||
+    index.can_acknowledge(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  stdio.stdout.write("db:candidate-index-wal-budget-ok");
+  return;
+}

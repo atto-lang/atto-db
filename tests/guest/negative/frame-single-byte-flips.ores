@@ -1,0 +1,30 @@
+// Independently mutate every byte in a complete 32-byte ODB1 frame.
+// All 32 mutations must fail; checksum is NOT authentication.
+// Exact stdout: db:wal-byte-flips-ok.
+import module wal_frame from "../../../src/wal/frame";
+pub routine main(): void {
+  let List<int> key = new List<int>();
+  let List<int> value = new List<int>();
+  key.add(107); value.add(118);
+  val result = wal_frame.encode(7,3,1,42,1,key,value);
+  if result.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val original = result.unwrap();
+  if original.length != 32; then stdio.stdout.write("db:FAILED"); return; fi
+  for (let changed_at = 0; changed_at < 32; changed_at++) {
+    let List<int> damaged = new List<int>();
+    for (let i = 0; i < 32; i++) {
+      if i == changed_at; then
+        let int bumped = original.get(i) + 1;
+        if bumped == 256; then bumped = 0; fi
+        damaged.add(bumped);
+      else
+        damaged.add(original.get(i));
+      fi
+    }
+    if !wal_frame.decode(damaged).is_err(); then
+      stdio.stdout.write("db:FAILED"); return;
+    fi
+  }
+  stdio.stdout.write("db:wal-byte-flips-ok");
+  return;
+}

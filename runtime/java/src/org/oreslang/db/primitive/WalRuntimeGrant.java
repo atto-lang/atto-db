@@ -65,6 +65,15 @@ final class WalRuntimeGrant {
     this.filePrimitive = primitive;
   }
 
+  /**
+   * Host-internal identity binding only; not proof that the runtime actually
+   * authenticated the tenant/isolate or exclusively leased the descriptor.
+   * Never register this method for guest interop or actor DATA access.
+   */
+  boolean isBoundTo(Context caller) {
+    return caller != null && caller == issuedContext && !revoked;
+  }
+
   /** Descriptor custody and race-resistant path resolution are caller duties.
    * This does not open a path, follow symlinks or claim an OS-level file lock. */
   static WalRuntimeGrant attachPreopenedFromRuntime(FileChannel authorizedFile,

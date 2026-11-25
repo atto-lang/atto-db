@@ -1,0 +1,77 @@
+name: DB host shard activation registry (NOT native guest)
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/db-shard-activation-registry.yml'
+      - 'runtime/java/src/org/oreslang/db/primitive/WalFilePrimitive.java'
+      - 'runtime/java/src/org/oreslang/db/primitive/WalRuntimeGrant.java'
+      - 'runtime/java/src/org/oreslang/db/primitive/WalActorContinuationGate.java'
+      - 'runtime/java/src/org/oreslang/db/primitive/ShardPublicationGate.java'
+      - 'runtime/java/src/org/oreslang/db/primitive/ShardActorHandoffBridge.java'
+      - 'runtime/java/src/org/oreslang/db/primitive/DbShardActivationRegistry.java'
+      - 'runtime/java/test/org/oreslang/db/primitive/DbShardActivationRegistryTest.java'
+  push:
+    branches:
+      - 'feat/native-db-activation-registry-stage13-20261031'
+      - 'hardening/db-shard-exclusive-wal-lease-stage14-20261031'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  activation-registry-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact head and all 7 Java blob hashes
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          declare -A sha=(
+            [runtime/java/src/org/oreslang/db/primitive/WalFilePrimitive.java]='044af806aefbffeb6ad440d403a10aa6b0e569aa'
+            [runtime/java/src/org/oreslang/db/primitive/WalRuntimeGrant.java]='406b0713dd621308f674eeee7bc403844f2df4e4'
+            [runtime/java/src/org/oreslang/db/primitive/WalActorContinuationGate.java]='402bf509c31a853ff16bf73a3c2687780225f153'
+            [runtime/java/src/org/oreslang/db/primitive/ShardPublicationGate.java]='9f24f06632494e0df063b0d8a6bcb1f3bb944f7b'
+            [runtime/java/src/org/oreslang/db/primitive/ShardActorHandoffBridge.java]='b53212362ac3382c652b12973d4cc09280cb0f64'
+            [runtime/java/src/org/oreslang/db/primitive/DbShardActivationRegistry.java]='0a698b571e06a1f8fce58c49df892e9670776c69'
+            [runtime/java/test/org/oreslang/db/primitive/DbShardActivationRegistryTest.java]='c39975fc3b71a83de3d3c530f35293e786e8e821'
+          )
+          for file in "${!sha[@]}"; do
+            test "$(git hash-object "$file")" = "${sha[$file]}"
+          done
+          echo "SOURCE_COMMIT=$(git rev-parse HEAD)"
+          echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Compile production grant and execute real WAL activation tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -version
+          javac -version
+          sha256sum "$(readlink -f "$(command -v java)")" "$(readlink -f "$(command -v javac)")"
+          mkdir -p "$RUNNER_TEMP/db-activation"
+          javac -Xlint:all -Werror -d "$RUNNER_TEMP/db-activation" \
+            runtime/java/src/org/oreslang/db/primitive/WalFilePrimitive.java \
+            runtime/java/src/org/oreslang/db/primitive/WalRuntimeGrant.java \
+            runtime/java/src/org/oreslang/db/primitive/WalActorContinuationGate.java \
+            runtime/java/src/org/oreslang/db/primitive/ShardPublicationGate.java \
+            runtime/java/src/org/oreslang/db/primitive/ShardActorHandoffBridge.java \
+            runtime/java/src/org/oreslang/db/primitive/DbShardActivationRegistry.java \
+            runtime/java/test/org/oreslang/db/primitive/DbShardActivationRegistryTest.java
+          printf '%s\n' 'HOST_SHARD_ACTIVATION_REGISTRY_PASS assertions=33 (host-only runtime harness; NOT native guest or durable recovery)' > "$RUNNER_TEMP/expected.txt"
+          for round in 1 2 3 4 5; do
+            timeout 60s java -cp "$RUNNER_TEMP/db-activation" \
+              org.oreslang.db.primitive.DbShardActivationRegistryTest > "$RUNNER_TEMP/actual.txt"
+            cmp "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt"
+            cat "$RUNNER_TEMP/actual.txt"
+          done
