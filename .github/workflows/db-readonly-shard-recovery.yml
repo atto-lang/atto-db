@@ -6,6 +6,10 @@ on:
       - 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java'
       - 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyShardRecovery.java'
       - 'runtime/java/test/org/oreslang/db/primitive/ReadOnlyShardRecoveryTest.java'
+  push:
+    branches:
+      - 'feat/native-db-readonly-recovery-candidate-stage15-20261031'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -16,11 +20,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Verify exact head and three immutable Git Java blobs
         shell: bash
         env:
-          EXACT_HEAD: ${{ github.event.pull_request.head.sha }}
+          EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXACT_HEAD"

@@ -10,6 +10,11 @@ on:
       - 'runtime/java/src/org/oreslang/db/primitive/ShardActorHandoffBridge.java'
       - 'runtime/java/src/org/oreslang/db/primitive/DbShardActivationRegistry.java'
       - 'runtime/java/test/org/oreslang/db/primitive/DbShardActivationRegistryTest.java'
+  push:
+    branches:
+      - 'feat/native-db-activation-registry-stage13-20261031'
+      - 'hardening/db-shard-exclusive-wal-lease-stage14-20261031'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -20,11 +25,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Verify exact head and all 7 Java blob hashes
         shell: bash
         env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
