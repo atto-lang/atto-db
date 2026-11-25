@@ -66,7 +66,9 @@ final class ShardPublicationGate {
   private final Map<ByteKey, byte[]> values = new HashMap<>();
   private final Set<ByteKey> historicalKeys = new HashSet<>();
   private final Set<Integer> operationIds = new HashSet<>();
-  private Phase phase = Phase.OPEN;
+  // Only this diagnostic phase is read from non-actor threads. All index
+  // mutations remain confined to a serialized trusted actor turn.
+  private volatile Phase phase = Phase.OPEN;
   private Pending pending;
   private int sequence;
   private int lastGeneration;
@@ -125,10 +127,21 @@ final class ShardPublicationGate {
     phase = Phase.PENDING;
     try {
       return writer.appendAndSync(context, frameBytes);
-    } catch (RuntimeException | Error admissionFailure) {
+    } catch (SecurityException | RejectedExecutionException |
+             IllegalArgumentException definitivePreAdmission) {
+      // The current WalRuntimeGrant/WalFilePrimitive contract throws these
+      // only before admitting a disk task (the queue-rejection path rolls
+      // back its admission counters). This is safe to correct/retry.
       pending = null;
       phase = Phase.OPEN;
-      throw admissionFailure;
+      throw definitivePreAdmission;
+    } catch (RuntimeException | Error possiblyAfterDispatch) {
+      // An unexpected failure may have occurred AFTER disk admission.
+      // Returning to OPEN would permit a second frame with the same sequence
+      // despite an uncertain first fsync. Preserve UNKNOWN instead.
+      pending = null;
+      phase = Phase.UNKNOWN;
+      throw possiblyAfterDispatch;
     }
   }
 
