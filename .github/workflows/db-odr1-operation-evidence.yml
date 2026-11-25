@@ -11,6 +11,10 @@ on:
       - 'runtime/java/test/org/oreslang/db/primitive/ReadOnlyOperationEvidenceLedgerTest.java'
       - 'runtime/java/test/org/oreslang/db/primitive/DbShardLifetimeCustodyTest.java'
       - 'runtime/java/test/org/oreslang/db/primitive/ReadOnlyGenerationFenceLedgerTest.java'
+  push:
+    branches:
+      - 'feat/native-db-operation-evidence-ledger-stage19-20261031'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -21,11 +25,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Verify PR commit and all eight exact Java blob hashes
         shell: bash
         env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
