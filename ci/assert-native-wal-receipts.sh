@@ -1,5 +1,5 @@
 #!/bin/sh
-# Fail-closed terminal receipt validation for the 15 exact ODB1 guest fixtures.
+# Fail-closed terminal receipt validation for the 16 exact ODB1 guest fixtures.
 # This checks the native verifier's OUTPUT CONTRACT, not compiler authenticity.
 set -eu
 export LC_ALL=C
@@ -31,7 +31,8 @@ BEGIN {
   expected[13]="tests/guest/positive/frame-operation-is-not-dedup.ores"
   expected[14]="tests/guest/negative/frame-trailer-each-byte.ores"
   expected[15]="tests/guest/positive/frame-u16-length-endian.ores"
-  terminal="GUEST_WAL_CODEC_ONLY_PASS cases=15; NO AUTHENTICATION, NO DURABILITY CLAIM"
+  expected[16]="tests/guest/negative/frame-highbit-identity-checksums.ores"
+  terminal="GUEST_WAL_CODEC_ONLY_PASS cases=16; NO AUTHENTICATION, NO DURABILITY CLAIM"
 }
 {
   if (finished) invalid=1
@@ -47,7 +48,7 @@ BEGIN {
   if (index($0,"FIXTURE_SHA256=")==1) {
     fixtureCount++
     # The native gate emits a 64-hex-character sha256sum and exact path.
-    if (fixtureCount > 15 || length($0) < 81 ||
+    if (fixtureCount > 16 || length($0) < 81 ||
         substr($0,1,15) != "FIXTURE_SHA256=" ||
         substr($0,80,2) != "  " ||
         substr($0,82) != expected[fixtureCount]) invalid=1
@@ -55,7 +56,7 @@ BEGIN {
     if (length(hex)!=64 || hex ~ /[^0123456789abcdef]/) invalid=1
     # Independently hash the exact pinned checkout fixture: a plausible but
     # forged 64-character checksum must not become guest-execution evidence.
-    if (fixtureCount <= 15) {
+    if (fixtureCount <= 16) {
       command="sha256sum " expected[fixtureCount]
       if ((command | getline actualHashLine) != 1 ||
           $0 != "FIXTURE_SHA256=" actualHashLine) invalid=1
@@ -64,17 +65,17 @@ BEGIN {
   }
   if (index($0,"GUEST_EXECUTED_PASS ")==1) {
     guestCount++
-    if (guestCount > 15 || $0 != "GUEST_EXECUTED_PASS " expected[guestCount] ||
+    if (guestCount > 16 || $0 != "GUEST_EXECUTED_PASS " expected[guestCount] ||
         guestCount > fixtureCount) invalid=1
   }
   if (index($0,"GUEST_WAL_CODEC_ONLY_PASS")==1) {
     summaryCount++
-    if ($0 != terminal || guestCount!=15 || fixtureCount!=15) invalid=1
+    if ($0 != terminal || guestCount!=16 || fixtureCount!=16) invalid=1
     finished=1
   }
 }
 END {
   if (invalid || commitCount!=1 || treeCount!=1 || digestCount!=1 ||
-      guestCount!=15 || fixtureCount!=15 || summaryCount!=1) exit 1
+      guestCount!=16 || fixtureCount!=16 || summaryCount!=1) exit 1
 }' "$file" || { echo 'REJECTED: missing, duplicate, forged or out-of-order native guest receipts' >&2; exit 1; }
-echo 'NATIVE_GUEST_RECEIPT_CONTRACT_PASS cases=15; OUTPUT CHECK ONLY'
+echo 'NATIVE_GUEST_RECEIPT_CONTRACT_PASS cases=16; OUTPUT CHECK ONLY'

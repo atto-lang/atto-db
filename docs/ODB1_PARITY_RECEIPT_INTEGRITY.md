@@ -1,3 +1,7 @@
+# Historical ODB1 receipt-integrity proposal (15-case predecessor)
+
+> Superseded implementation: the integrated 16-case gate in [ODB1_UNIFIED_16CASE_EVIDENCE_GATE.md](ODB1_UNIFIED_16CASE_EVIDENCE_GATE.md) preserves the ordered receipts, independent rehashing, unique source roots and post-run checks described below, and adds the sixteenth fixture. The older 15-case implementation is not reintroduced. Hosted host-only CI run [45546818390](https://github.com/atto-lang/atto-db/actions/runs/45546818390) executed the integrated tests. Native Atto guest execution remains NOT_EXECUTED. The original text is retained below for audit history, not as the current gate.
+
 # ODB1 five-backend receipt integrity hardening
 
 **Scope:** this patch hardens the **verification harness**, not Oreslang guest implementations, backend compiler binaries, WAL durability, recovered append, or guest ACK. The prior coordinator performed SHA and source-root preflight but credited `BACKEND_GUEST_CODEC_PASS` immediately after a child `verify-native-wal.sh` exited zero. A truncated or early-success child output could receive false positive credit.
