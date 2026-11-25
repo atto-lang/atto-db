@@ -39,8 +39,14 @@ run_case() {
   file="$1"
   expected="$2"
   printf 'FIXTURE_SHA256='; sha256sum "$file"
-  timeout 20s "$ORESLANG_BIN" --check "$file" >"$tmp/check.out" 2>"$tmp/check.err"
-  timeout 20s "$ORESLANG_BIN" "$file" >"$tmp/actual" 2>"$tmp/runtime.err"
+  if timeout 20s "$ORESLANG_BIN" --check "$file" >"$tmp/check.out" 2>"$tmp/check.err"; then :; else
+    status=$?; echo "FAILED typecheck: $file (exit $status)" >&2
+    cat "$tmp/check.out" "$tmp/check.err" >&2; exit "$status"
+  fi
+  if timeout 20s "$ORESLANG_BIN" "$file" >"$tmp/actual" 2>"$tmp/runtime.err"; then :; else
+    status=$?; echo "FAILED guest execution: $file (exit $status)" >&2
+    cat "$tmp/actual" "$tmp/runtime.err" >&2; exit "$status"
+  fi
   printf '%s' "$expected" >"$tmp/expected"
   if ! cmp -s "$tmp/expected" "$tmp/actual"; then
     echo "FAILED exact stdout: $file" >&2
