@@ -96,7 +96,7 @@ define module wal_frame as
       return Err("invalid_byte");
     fi
 
-    let List<int> output = new List<int>();
+    val List<int> output = new List<int>();
     output.add(79); output.add(68); output.add(66); output.add(49);
     output.add(1);
     output.add(kind);
@@ -151,8 +151,8 @@ define module wal_frame as
     if !checksum_matches(input, payload_end); then
       return Err("checksum_mismatch");
     fi
-    let List<int> key = new List<int>();
-    let List<int> value = new List<int>();
+    val List<int> key = new List<int>();
+    val List<int> value = new List<int>();
     for (let i = 0; i < key_length; i++) {
       key.add(input.get(26 + i));
     }

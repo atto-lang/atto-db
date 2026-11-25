@@ -2,8 +2,8 @@
 // Exact stdout: "db:wal-boundaries-ok" (no terminal newline).
 import module wal_frame from "../../../src/wal/frame";
 pub routine main(): void {
-  let List<int> key = new List<int>();
-  let List<int> zeros = new List<int>();
+  val List<int> key = new List<int>();
+  val List<int> zeros = new List<int>();
   key.add(107);
   for (let i = 0; i < 1024; i++) { zeros.add(0); }
 
@@ -25,7 +25,7 @@ pub routine main(): void {
   fi
 
   // The full legal frame must be accepted without exceeding the wire cap.
-  let List<int> max_key = new List<int>();
+  val List<int> max_key = new List<int>();
   for (let i = 0; i < 64; i++) { max_key.add(107); }
   val max_frame = wal_frame.encode(2147483647, 2147483647,
     2147483647, 2147483647, 1, max_key, zeros);
@@ -36,9 +36,9 @@ pub routine main(): void {
   fi
 
   // A high-bit ID must be rejected before signed 32-bit arithmetic.
-  let List<int> bad_id = new List<int>();
-  let List<int> trailing = new List<int>();
-  let List<int> invalid_byte = new List<int>();
+  val List<int> bad_id = new List<int>();
+  val List<int> trailing = new List<int>();
+  val List<int> invalid_byte = new List<int>();
   for (let i = 0; i < wire.length; i++) {
     if i == 9; then bad_id.add(255);
     else bad_id.add(wire.get(i)); fi
@@ -47,7 +47,7 @@ pub routine main(): void {
     else invalid_byte.add(wire.get(i)); fi
   }
   trailing.add(0);
-  let List<int> bad_key = new List<int>();
+  val List<int> bad_key = new List<int>();
   bad_key.add(-1);
   if !wal_frame.decode(bad_id).is_err() ||
     !wal_frame.decode(trailing).is_err() ||
@@ -58,7 +58,7 @@ pub routine main(): void {
   fi
 
   // The shortest canonical DELETE record is 31 bytes.
-  let List<int> empty = new List<int>();
+  val List<int> empty = new List<int>();
   val deleted = wal_frame.encode(7, 3, 2, 43, 2, key, empty);
   if deleted.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
   val delete_wire = deleted.unwrap();
