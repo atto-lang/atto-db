@@ -1,0 +1,33 @@
+// Every incomplete ODB1 prefix and every concatenated/trailing frame
+// must reject as a single frame; stream framing belongs to the WAL reader.
+// Exact stdout: db:wal-framing-ok.
+import module wal_frame from "../../../src/wal/frame";
+pub routine main(): void {
+  let List<int> key = new List<int>();
+  let List<int> value = new List<int>();
+  key.add(107); value.add(118);
+  val packed = wal_frame.encode(7, 3, 1, 42, 1, key, value);
+  if packed.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val wire = packed.unwrap();
+  if wire.length != 32 || wal_frame.decode(wire).is_err(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  for (let n = 0; n < wire.length; n++) {
+    let List<int> partial = new List<int>();
+    for (let i = 0; i < n; i++) { partial.add(wire.get(i)); }
+    if !wal_frame.decode(partial).is_err(); then
+      stdio.stdout.write("db:FAILED"); return;
+    fi
+  }
+  let List<int> suffix = new List<int>();
+  let List<int> joined = new List<int>();
+  for (const octet of wire) { suffix.add(octet); joined.add(octet); }
+  suffix.add(0);
+  for (const octet of wire) { joined.add(octet); }
+  if !wal_frame.decode(suffix).is_err() ||
+    !wal_frame.decode(joined).is_err(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  stdio.stdout.write("db:wal-framing-ok");
+  return;
+}

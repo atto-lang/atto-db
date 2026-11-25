@@ -1,0 +1,28 @@
+// ODB1 encoded and decoded byte ownership: mutable callers must not
+// retroactively alter already serialized or decoded WAL frame candidates.
+// Exact stdout: db:wal-copy-isolation-ok. This is NOT a security capability.
+import module wal_frame from "../../../src/wal/frame";
+pub routine main(): void {
+  let List<int> key = new List<int>();
+  let List<int> value = new List<int>();
+  key.add(107); value.add(118);
+  val output = wal_frame.encode(7,3,1,42,1,key,value);
+  if output.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  let List<int> wire = output.unwrap();
+  key.set(0,90); value.set(0,89);
+  if wire.get(26) != 107 || wire.get(27) != 118; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  val parsed = wal_frame.decode(wire);
+  if parsed.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val decoded = parsed.unwrap();
+  wire.set(26,90); wire.set(27,89);
+  if decoded.key.get(0) != 107 || decoded.value.get(0) != 118; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  if !wal_frame.decode(wire).is_err(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  stdio.stdout.write("db:wal-copy-isolation-ok");
+  return;
+}
