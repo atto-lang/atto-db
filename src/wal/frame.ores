@@ -20,16 +20,16 @@ define module wal_frame as
   }
 
   fnc append_u16(List<int> mut output, int number): void {
-    output.add(number - (number >> 8) * 256);
-    output.add(number >> 8);
+    output.add(number - (number >>> 8) * 256);
+    output.add(number >>> 8);
     return;
   }
 
   fnc append_u32(List<int> mut output, int number): void {
     let int rest = number;
     for (let i = 0; i < 4; i++) {
-      output.add(rest - (rest >> 8) * 256);
-      rest = rest >> 8;
+      output.add(rest - (rest >>> 8) * 256);
+      rest = rest >>> 8;
     }
     return;
   }
