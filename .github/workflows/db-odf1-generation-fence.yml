@@ -1,0 +1,67 @@
+name: DB ODF1 two-slot generation fence candidate (host only)
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/db-odf1-generation-fence.yml'
+      - 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java'
+      - 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyShardRecovery.java'
+      - 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyGenerationFenceLedger.java'
+      - 'runtime/java/test/org/oreslang/db/primitive/ReadOnlyGenerationFenceLedgerTest.java'
+  push:
+    branches:
+      - 'feat/native-db-generation-fence-stage17-20261031'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  odf1-host-candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact PR head and immutable source bytes
+        shell: bash
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          declare -A sha=(
+            [runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java]='8da48ec37b5a2ab8cb141c2403669fce6ffb6024'
+            [runtime/java/src/org/oreslang/db/primitive/ReadOnlyShardRecovery.java]='5208e8503587eb69aeb908a62bfd223b32961583'
+            [runtime/java/src/org/oreslang/db/primitive/ReadOnlyGenerationFenceLedger.java]='c313446947defcfbcb3129061a2bea0d8e109b16'
+            [runtime/java/test/org/oreslang/db/primitive/ReadOnlyGenerationFenceLedgerTest.java]='f739bb4d8535492bb33a291ae6b039ba39fb5482'
+          )
+          for source in "${!sha[@]}"; do
+            test "$(git hash-object "$source")" = "${sha[$source]}"
+          done
+          echo "SOURCE_HEAD=$(git rev-parse HEAD)"
+          echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Compile actual sources and execute ODF1 force-then-halt restarts
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -version
+          javac -version
+          sha256sum "$(readlink -f "$(command -v java)")" "$(readlink -f "$(command -v javac)")"
+          mkdir -p "$RUNNER_TEMP/odf1"
+          javac -Xlint:all -Werror -d "$RUNNER_TEMP/odf1" \
+            runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java \
+            runtime/java/src/org/oreslang/db/primitive/ReadOnlyShardRecovery.java \
+            runtime/java/src/org/oreslang/db/primitive/ReadOnlyGenerationFenceLedger.java \
+            runtime/java/test/org/oreslang/db/primitive/ReadOnlyGenerationFenceLedgerTest.java
+          printf '%s\n' 'HOST_ODF1_GENERATION_FENCE_PASS checks=46 (durable-candidate records only; NO writer, actor runtime or guest ACK)' > "$RUNNER_TEMP/expected.txt"
+          for round in 1 2 3 4 5; do
+            timeout 40s java -cp "$RUNNER_TEMP/odf1" \
+              org.oreslang.db.primitive.ReadOnlyGenerationFenceLedgerTest > "$RUNNER_TEMP/actual.txt"
+            cmp "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt"
+            cat "$RUNNER_TEMP/actual.txt"
+          done
