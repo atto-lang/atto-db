@@ -31,6 +31,7 @@ public final class ActorPgPrincipalPoolTest {
         final AtomicInteger closes = new AtomicInteger();
         final AtomicInteger statements = new AtomicInteger();
         final AtomicInteger checks = new AtomicInteger();
+        final AtomicBoolean failClose = new AtomicBoolean();
 
         RoleSource(String loginRole) {
             this.loginRole = loginRole;
@@ -41,7 +42,10 @@ public final class ActorPgPrincipalPoolTest {
             return proxy(Connection.class, (conn, method, args) -> {
                 switch (method.getName()) {
                     case "setReadOnly", "setAutoCommit", "commit", "rollback" -> { return null; }
-                    case "close" -> { closes.incrementAndGet(); return null; }
+                    case "close" -> {
+                        if (failClose.get()) throw new SQLException("injected uncertain physical close");
+                        closes.incrementAndGet(); return null;
+                    }
                     case "prepareStatement" -> {
                         String sql = (String) args[0];
                         if (sql.equals("SELECT session_user, current_user")) {
@@ -161,6 +165,28 @@ public final class ActorPgPrincipalPoolTest {
             new ActorPgPool.PrincipalBinding("role;SET ROLE other", a);
             throw new AssertionError("unsafe database identifier admitted");
         } catch (IllegalArgumentException expected) { }
+        // An uncertain close must not let the owner open a replacement tenant session.
+        RoleSource uncertain = new RoleSource("db_uncertain");
+        RoleSource other = new RoleSource("db_other");
+        try (ActorPgPool pool = newPool(Map.of(
+                "uncertain", new ActorPgPool.PrincipalBinding("db_uncertain", uncertain),
+                "other", new ActorPgPool.PrincipalBinding("db_other", other)))) {
+            var first = pool.grantTenant("uncertain", Set.of("write"));
+            var second = pool.grantTenant("other", Set.of("write"));
+            write(pool, first);
+            uncertain.failClose.set(true);
+            try {
+                pool.submit(second, "write", List.of()).get(5, TimeUnit.SECONDS);
+                throw new AssertionError("uncertain close admitted another tenant");
+            } catch (ExecutionException expected) { }
+            check(other.opens.get() == 0 && other.statements.get() == 0,
+                  "uncertain close opened or used a replacement connection");
+            try {
+                pool.submit(first, "write", List.of());
+                throw new AssertionError("quarantined pool accepted new work");
+            } catch (IllegalStateException expected) { }
+            await(pool);
+        }
         System.out.println("ACTOR_PG_PRINCIPAL_FENCED_OWNER_HOST_PASS");
     }
 }

@@ -83,7 +83,7 @@ public final class ActorPgPool implements AutoCloseable {
     private final BlockingQueue<Completion> completions;
     private final List<Thread> completionWorkers = new ArrayList<>();
     private int outstanding;
-    private boolean closed;
+    private volatile boolean closed;
 
     /** Legacy single-role host reference; a tenant GUC is not an authorization principal. */
     public ActorPgPool(DataSource source, Collection<Template> registered, int connections,
@@ -287,7 +287,7 @@ public final class ActorPgPool implements AutoCloseable {
                             if (connection != null && !tenant.equals(connectionTenant)) {
                                 // Closing before switching forbids reuse of a session
                                 // authenticated as another tenant.
-                                closeQuietly(connection);
+                                retireOrQuarantine(connection);
                                 connection = null;
                                 connectionTenant = null;
                             }
@@ -308,7 +308,10 @@ public final class ActorPgPool implements AutoCloseable {
                     }
                 } catch (Exception failure) {
                     error = failure;
-                    closeQuietly(connection);
+                    try { retireOrQuarantine(connection); }
+                    catch (SQLException retirement) {
+                        if (retirement != failure) failure.addSuppressed(retirement);
+                    }
                     connection = null;
                     connectionTenant = null;
                 }
@@ -344,6 +347,18 @@ public final class ActorPgPool implements AutoCloseable {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        }
+    }
+    /** An uncertain JDBC close must not permit an additional physical session. */
+    private void retireOrQuarantine(Connection connection) throws SQLException {
+        if (connection == null) return;
+        try { connection.close(); }
+        catch (SQLException retirement) {
+            // Stop admission and drain queued work before any owner can replace
+            // this potentially still-live session. Existing in-flight effects
+            // remain indeterminate and completion dispatch fails closed.
+            close();
+            throw retirement;
         }
     }
     private static void closeQuietly(Connection connection) {
