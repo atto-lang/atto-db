@@ -130,6 +130,42 @@ assert_no_guest_credit() {
   fi
 }
 cp "$tmp/repo/ci/verify-native-wal.sh" "$tmp/valid-mock"
+# Preserve the older final-integrity branch's explicit per-backend failure tests.
+{
+  printf '#!/bin/sh\n'
+  printf 'if [ "${MOCK_FAIL_BACKEND:-}" = "${ORESLANG_BACKEND:-}" ]; then exit 17; fi\n'
+  tail -n +2 "$tmp/valid-mock"
+} > "$tmp/repo/ci/verify-native-wal.sh"
+(cd "$tmp/repo" && git add . && git -c user.name=gate-test -c user.email=gate-test@invalid.example commit -qm 'per-backend failure mock')
+export DB_EXPECTED_COMMIT="$(git -C "$tmp/repo" rev-parse HEAD)"
+export DB_EXPECTED_TREE="$(git -C "$tmp/repo" rev-parse 'HEAD^{tree}')"
+for backend in java llvm wasm cranelift dotnet; do
+  if (cd "$tmp/repo" && MOCK_FAIL_BACKEND="$backend" sh ci/verify-five-backend-wal-parity.sh) > "$tmp/out" 2> "$tmp/err"; then
+    echo "FAILED: backend failure accepted: $backend" >&2; exit 1
+  fi
+  grep -Fxq "BACKEND_GUEST_EXECUTION_FAILED $backend" "$tmp/err"
+  if grep -q '^FIVE_BACKEND_ODB1_EXECUTION_CANDIDATE_PASS' "$tmp/out" ||
+     grep -Fq "BACKEND_GUEST_CODEC_PASS=$backend " "$tmp/out"; then
+    echo "FAILED: credited failing backend $backend" >&2; exit 1
+  fi
+done
+# Also reject late mutation of the DB checkout, not only the backend root/binary.
+{
+  printf '#!/bin/sh\n'
+  printf 'if [ "${ORESLANG_BACKEND:-}" = dotnet ]; then printf "unexpected\\n" > late-db-mutation; fi\n'
+  tail -n +2 "$tmp/valid-mock"
+} > "$tmp/repo/ci/verify-native-wal.sh"
+(cd "$tmp/repo" && git add . && git -c user.name=gate-test -c user.email=gate-test@invalid.example commit -qm 'late DB mutation mock')
+export DB_EXPECTED_COMMIT="$(git -C "$tmp/repo" rev-parse HEAD)"
+export DB_EXPECTED_TREE="$(git -C "$tmp/repo" rev-parse 'HEAD^{tree}')"
+if (cd "$tmp/repo" && sh ci/verify-five-backend-wal-parity.sh) > "$tmp/out" 2> "$tmp/err"; then
+  echo 'FAILED: late DB mutation accepted' >&2; exit 1
+fi
+grep -Fxq 'ODB1_SOURCE_CHANGED_DURING_GUEST_EXECUTION dotnet' "$tmp/err"
+if grep -q '^FIVE_BACKEND_ODB1_EXECUTION_CANDIDATE_PASS' "$tmp/out"; then
+  echo 'FAILED: credited dirty DB checkout' >&2; exit 1
+fi
+rm "$tmp/repo/late-db-mutation"
 printf '%s\n' '#!/bin/sh' 'echo "GUEST_WAL_CODEC_ONLY_PASS cases=16; NO AUTHENTICATION, NO DURABILITY CLAIM"' \
   > "$tmp/repo/ci/verify-native-wal.sh"
 # Re-commit test-only fixture so the exact root/tree preflight succeeds.
