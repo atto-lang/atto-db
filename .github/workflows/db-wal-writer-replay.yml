@@ -1,0 +1,64 @@
+
+name: DB host writer-to-replay contract (NOT Oreslang guest)
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/db-wal-writer-replay.yml'
+      - 'runtime/java/src/org/oreslang/db/primitive/WalFilePrimitive.java'
+      - 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java'
+      - 'runtime/java/test/org/oreslang/db/primitive/WalPrimitiveReplayIntegrationTest.java'
+      - 'runtime/java/test/org/oreslang/db/primitive/WalPrimitiveProcessKillReplayTest.java'
+  push:
+    branches:
+      - 'feat/native-db-postsync-crash-replay-stage8-20261031'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  writer-replay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert checked out exact source head and trusted source blobs
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          test "$(git hash-object runtime/java/src/org/oreslang/db/primitive/WalFilePrimitive.java)" = '044af806aefbffeb6ad440d403a10aa6b0e569aa'
+          test "$(git hash-object runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java)" = '8da48ec37b5a2ab8cb141c2403669fce6ffb6024'
+          echo "SOURCE_COMMIT=$(git rev-parse HEAD)"
+          echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Compile and execute host producer/reader integration test
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum "$(readlink -f "$(command -v java)")" "$(readlink -f "$(command -v javac)")"
+          mkdir -p "$RUNNER_TEMP/db-writer-replay"
+          javac -Xlint:all -Werror -d "$RUNNER_TEMP/db-writer-replay" \
+            runtime/java/src/org/oreslang/db/primitive/WalFilePrimitive.java \
+            runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java \
+            runtime/java/test/org/oreslang/db/primitive/WalPrimitiveReplayIntegrationTest.java \
+            runtime/java/test/org/oreslang/db/primitive/WalPrimitiveProcessKillReplayTest.java
+          timeout 50s java -cp "$RUNNER_TEMP/db-writer-replay" \
+            org.oreslang.db.primitive.WalPrimitiveReplayIntegrationTest \
+            > "$RUNNER_TEMP/writer-replay.txt"
+          printf '%s\n' 'HOST_WAL_PRIMITIVE_REPLAY_PASS checks=16 (actual host WAL writer and read-only inspector; NOT Oreslang guest or DB ACK)' > "$RUNNER_TEMP/expected.txt"
+          cmp "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/writer-replay.txt"
+          cat "$RUNNER_TEMP/writer-replay.txt"
+          timeout 55s java -cp "$RUNNER_TEMP/db-writer-replay" \
+            org.oreslang.db.primitive.WalPrimitiveProcessKillReplayTest \
+            > "$RUNNER_TEMP/writer-kill-replay.txt"
+          printf '%s\n' 'HOST_WAL_PRIMITIVE_PROCESS_KILL_PASS checks=14 (real host WAL force/replay; NOT guest ACK, lease or power loss)' > "$RUNNER_TEMP/expected-kill.txt"
+          cmp "$RUNNER_TEMP/expected-kill.txt" "$RUNNER_TEMP/writer-kill-replay.txt"
+          cat "$RUNNER_TEMP/writer-kill-replay.txt"
