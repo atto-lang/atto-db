@@ -97,3 +97,22 @@ backends currently support List/Result/module imports or the ODB1 actor.
 runs eight independent POSIX-shell integer division/shift boundary vectors,
 and asserts the guard rejects the old invalid source. This is **HOST-ONLY**.
 Compiled real `.ores` guests and exact-head CI execution are still required.
+
+## Stage-35 addendum — checksum-valid signed identity forgery
+
+The earlier nine- and fifteen-case counts above describe their historical
+stages. The current native ODB1 codec matrix extends them to **16 fixtures per
+backend, 80 required Oreslang guest executions**. The new negative fixture
+`frame-highbit-identity-checksums.ores` independently asserts the precise
+Adler32 footer for all four forged u32 high bits before requiring a normal
+`Result.Err` return rather than a checked-arithmetic trap. Re-decoding the
+untouched source frame after each mutation checks its continued validity.
+
+The source root admission contract additionally requires five distinct,
+canonicalized compiler source checkouts, none equal to the DB checkout. Three
+new host-only negative configurations (reused root, DB self-reference, and
+symlink alias) extend the coordinator harness from 14 to 17 scenarios.
+Passing these mock checks does NOT prove frontend support, native code
+generation, durability, runtime capabilities, or provenance binding. The
+source-org workflow must actually execute, and cross-organization copying of
+private source remains subject to issue #15 approval.

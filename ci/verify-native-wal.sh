@@ -35,6 +35,10 @@ printf 'SOURCE_COMMIT=%s\nSOURCE_TREE=%s\nCOMPILER_BINARY_SHA256=%s\n' \
   "$actual_commit" "$actual_tree" "$ORESLANG_COMPILER_SHA256"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+# Both --check and normal execution must reject a malformed *copy* of a
+# known-good guest in the same import-relative directory. This rejects
+# accept-all stubs before awarding any native guest case credit.
+sh ci/verify-native-wal-negative-challenge.sh
 completed_cases=0
 run_case() {
   file="$1"
@@ -66,5 +70,6 @@ run_case tests/guest/positive/frame-adler-collision.ores db:wal-adler-collision-
 run_case tests/guest/positive/frame-operation-is-not-dedup.ores db:wal-codec-not-dedup-ok
 run_case tests/guest/negative/frame-trailer-each-byte.ores db:wal-trailer-corruption-ok
 run_case tests/guest/positive/frame-u16-length-endian.ores db:wal-u16-endian-ok
-test "$completed_cases" -eq 15 || { echo 'incomplete guest codec corpus' >&2; exit 1; }
-echo 'GUEST_WAL_CODEC_ONLY_PASS cases=15; NO AUTHENTICATION, NO DURABILITY CLAIM'
+run_case tests/guest/negative/frame-highbit-identity-checksums.ores db:wal-highbit-identity-checksums-ok
+test "$completed_cases" -eq 16 || { echo 'incomplete guest codec corpus' >&2; exit 1; }
+echo 'GUEST_WAL_CODEC_ONLY_PASS cases=16; NO AUTHENTICATION, NO DURABILITY CLAIM'
