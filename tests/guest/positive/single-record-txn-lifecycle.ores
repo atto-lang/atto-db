@@ -13,7 +13,7 @@ pub routine main(): void {
     stdio.stdout.write("db:FAILED"); return;
   fi
   if !tx.seal() || tx.seal() ||
-    !tx.dispatched(3, 42) || tx.dispatched(3, 42) ||
+    !tx.begin_dispatch(3, 42) || tx.begin_dispatch(3, 42) ||
     tx.abort_before_dispatch() || !tx.outcome_indeterminate() ||
     tx.current_phase() != 3 || tx.can_acknowledge(); then
     stdio.stdout.write("db:FAILED"); return;
@@ -33,7 +33,7 @@ pub routine main(): void {
   if queued.stage(7, 4, 101, 43, 1118).is_err() ||
     !queued.seal() || !queued.abort_before_dispatch() ||
     queued.current_phase() != 5 || queued.held_bytes() != 0 ||
-    queued.dispatched(4, 43) || queued.stage(7, 4, 101, 44, 31).is_ok(); then
+    queued.begin_dispatch(4, 43) || queued.stage(7, 4, 101, 44, 31).is_ok(); then
     stdio.stdout.write("db:FAILED"); return;
   fi
   stdio.stdout.write("db:single-txn-lifecycle-ok");

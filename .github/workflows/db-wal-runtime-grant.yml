@@ -1,0 +1,47 @@
+name: DB WAL runtime grant (host only)
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/db-wal-runtime-grant.yml'
+      - 'ci/verify-host-storage-grant.sh'
+      - 'runtime/java/src/org/oreslang/db/primitive/WalRuntimeGrant.java'
+      - 'runtime/java/test/org/oreslang/db/primitive/WalRuntimeGrantTest.java'
+      - 'ci/verify-java-storage-primitive.sh'
+      - 'runtime/java/src/org/oreslang/db/primitive/WalFilePrimitive.java'
+      - 'runtime/java/test/org/oreslang/db/primitive/WalFilePrimitiveTest.java'
+  push:
+    branches:
+      - 'feat/native-db-runtime-storage-grant-stage4-20261031'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  runtime-grant-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      DB_EXPECTED_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          submodules: false
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Verify independently retrieved tree and execute real file tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$DB_EXPECTED_COMMIT"
+          export DB_EXPECTED_TREE="$(curl --fail --silent --show-error --retry 2 "https://api.github.com/repos/atto-lang/atto-db/git/commits/$DB_EXPECTED_COMMIT" | jq -er '.tree.sha')"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$DB_EXPECTED_TREE"
+          export JAVA_BIN="$(readlink -f "$(command -v java)")"
+          export JAVAC_BIN="$(readlink -f "$(command -v javac)")"
+          export JAVA_SHA256="$(sha256sum "$JAVA_BIN" | cut -d' ' -f1)"
+          export JAVAC_SHA256="$(sha256sum "$JAVAC_BIN" | cut -d' ' -f1)"
+          sh -n ci/verify-java-storage-primitive.sh
+          sh ci/verify-host-storage-grant.sh
+          test -z "$(git status --porcelain)"
