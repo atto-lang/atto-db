@@ -49,3 +49,13 @@ AttoLang is the canonical project name; new source, examples and documentation u
 `reference/migration_plan.py` provides a deterministic, lexical-tie-break topological sort of migration IDs and dependency edges. It rejects cycles, unknown or duplicate dependencies, invalid names, and inconsistent already-applied histories. This reference **never** connects to a database, reads credentials, opens SQL files or applies a migration. No AttoLang or database-runtime support is claimed.
 
 Run `python3 -m unittest discover -s tests -v` for host-only checks. Future implementations must add transactional locking, checksums, WAL/recovery behavior, actor-safe cancellation and per-backend execution evidence.
+
+## Legacy compatibility and migration evidence
+
+The archived [legacy Oreslang database repository](https://github.com/ores-truffle-oreslang/oreslang-db) is historical provenance, not the canonical development location. Existing `.ores` fixtures, package names and CLI names are legacy compatibility inputs; verify their syntax and behavior against the current Atto specification and actual compilers before claiming support. New canonical examples use `.atto`.
+
+Database engine primitives, WAL/storage experiments, actor-owned recovery and portable database contracts belong here. The [atto-lang](https://github.com/atto-lang) organization owns language, compiler/runtime specifications and portable libraries; [atto-co](https://github.com/atto-co) separately owns hosted infrastructure, customer tenancy, identity, billing and production operations. Do not infer a GitHub ownership transfer or implementation parity merely from matching repository names.
+
+For future repository transfers or source exports, record source and target numeric repository IDs, exact commit/tree, authorization, permissions, rulesets, PRs, releases, packages, Apps, secrets, webhooks, Actions admission, consumers and rollback ownership. Verify the resulting identity/history/tree and rebind security checks after an authorized transfer. Private-source CI mirrors require the applicable independent authorization and exact-tree verification; never copy credentials or use a source-organization token in a carrier. No transfer or private-source export is authorized by this document.
+
+Use prepared statements and typed parameters, explicit commit/rollback and cancellation lifecycles, and actor-confined capabilities. Never log credentials or send privileged connection handles as ordinary DATA messages. Run database integration tests against disposable isolated databases, not production credentials. Distinguish host-reference tests from actual compiled guest execution and durable recovery evidence.
