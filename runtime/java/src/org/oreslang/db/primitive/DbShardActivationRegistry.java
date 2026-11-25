@@ -2,6 +2,8 @@ package org.oreslang.db.primitive;
 
 import java.io.IOException;
 import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.Map;
@@ -19,9 +21,11 @@ import java.util.concurrent.RejectedExecutionException;
  *
  * The real runtime MUST authenticate the activation, establish OS-level FD
  * custody, enforce scheduler actor turns, and durably fence generations. The
- * registry rejects duplicate *Java channel identity* and stale generations
+ * registry rejects duplicate *Java channel identity*, uses an OS advisory
+ * lock against cooperating inode aliases, and fences stale generations
  * within this process, but cannot detect different FDs aliasing the same file
- * or protect against process restart. It neither recovers WAL nor issues ACK.
+ * or protect against noncooperating writers or process restart.
+ * It neither recovers WAL nor issues ACK.
  */
 final class DbShardActivationRegistry {
   record ShardKey(int tenant, int isolate, int shard) {
@@ -54,6 +58,7 @@ final class DbShardActivationRegistry {
     private final ShardKey key;
     private final int generation;
     private final FileChannel descriptor;
+    private final FileLock exclusiveLease;
     private final WalRuntimeGrant.Context context;
     private final WalRuntimeGrant writer;
     private final ShardActorHandoffBridge handoff;
@@ -61,11 +66,12 @@ final class DbShardActivationRegistry {
     private volatile boolean invalidated;
     private CompletableFuture<Void> closeResult;
 
-    private Activation(ShardKey k, int gen, FileChannel channel,
+    private Activation(ShardKey k, int gen, FileChannel channel, FileLock lease,
                        WalRuntimeGrant.Context ctx, WalRuntimeGrant grant) {
       key = k;
       generation = gen;
       descriptor = channel;
+      exclusiveLease = lease;
       context = ctx;
       writer = grant;
       handoff = ShardActorHandoffBridge.fromTrustedRuntime(ctx, grant,
@@ -133,8 +139,8 @@ final class DbShardActivationRegistry {
       throws IOException {
     Objects.requireNonNull(key);
     Objects.requireNonNull(preopened);
-    if (generation <= 0 || !preopened.isOpen() || preopened.size() != 0)
-      throw new IllegalArgumentException("invalid generation or nonempty WAL");
+    if (generation <= 0 || !preopened.isOpen())
+      throw new IllegalArgumentException("invalid generation or closed WAL");
     if (!runtime.mayActivate(key, generation, preopened))
       throw new SecurityException("runtime storage custody not granted");
     synchronized (lock) {
@@ -142,15 +148,34 @@ final class DbShardActivationRegistry {
       if (slot.active != null || slot.closing ||
           generation <= slot.highestGeneration || ownedChannels.contains(preopened))
         throw new RejectedExecutionException("duplicate descriptor, active shard, or stale epoch");
-      var owner = new WalFilePrimitive.Owner(
-          key.tenant(), key.isolate(), key.shard(), generation);
-      var context = WalRuntimeGrant.issueContextFromTrustedRuntime(owner);
-      var grant = WalRuntimeGrant.attachPreopenedFromRuntime(preopened, context);
-      Activation activation = new Activation(key, generation, preopened, context, grant);
-      slot.active = activation;
-      slot.highestGeneration = generation;
-      ownedChannels.add(preopened);
-      return activation;
+      // Acquire a nonblocking OS advisory lock BEFORE inspecting file size.
+      // This also excludes independently opened FileChannels of the same inode
+      // inside this process. Noncooperating writers remain a runtime risk.
+      final FileLock lease;
+      try { lease = preopened.tryLock(); }
+      catch (OverlappingFileLockException alreadyLeased) {
+        throw new RejectedExecutionException("WAL inode already leased", alreadyLeased);
+      }
+      if (lease == null) throw new RejectedExecutionException("WAL OS lease unavailable");
+      boolean attached = false;
+      try {
+        if (!preopened.isOpen() || preopened.size() != 0)
+          throw new IllegalArgumentException("nonempty WAL requires trusted recovery");
+        var owner = new WalFilePrimitive.Owner(
+            key.tenant(), key.isolate(), key.shard(), generation);
+        var context = WalRuntimeGrant.issueContextFromTrustedRuntime(owner);
+        var grant = WalRuntimeGrant.attachPreopenedFromRuntime(preopened, context);
+        Activation activation = new Activation(key, generation, preopened, lease, context, grant);
+        slot.active = activation;
+        slot.highestGeneration = generation;
+        ownedChannels.add(preopened);
+        attached = true;
+        return activation;
+      } finally {
+        // Failed admission must not strand the OS lock or reserve an epoch.
+        // Successful admission retains it until async WAL closure.
+        if (!attached && lease.isValid()) lease.release();
+      }
     }
   }
 
@@ -214,6 +239,13 @@ final class DbShardActivationRegistry {
           // NEVER unblock a new generation if the FD may remain live.
           result.completeExceptionally(failure);
           return;
+        }
+        // A successful WAL close must have invalidated its exclusive OS lock.
+        // Do not reuse a shard if the old descriptor or lock remains live.
+        if (activation.descriptor.isOpen() || activation.exclusiveLease.isValid()) {
+          result.completeExceptionally(new IllegalStateException(
+              "WAL shutdown returned before exclusive FD lease release"));
+          return; // retain slot.closing=true forever
         }
         synchronized (lock) {
           ownedChannels.remove(activation.descriptor);
