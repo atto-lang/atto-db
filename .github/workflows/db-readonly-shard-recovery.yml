@@ -1,0 +1,60 @@
+name: DB ODB1 full-WAL readonly recovery candidate (NOT guest durability)
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/db-readonly-shard-recovery.yml'
+      - 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java'
+      - 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyShardRecovery.java'
+      - 'runtime/java/test/org/oreslang/db/primitive/ReadOnlyShardRecoveryTest.java'
+  push:
+    branches:
+      - 'feat/native-db-readonly-recovery-candidate-stage15-20261031'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  readonly-recovery-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact head and three immutable Git Java blobs
+        shell: bash
+        env:
+          EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          test "$(git hash-object runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java)" = '8da48ec37b5a2ab8cb141c2403669fce6ffb6024'
+          test "$(git hash-object runtime/java/src/org/oreslang/db/primitive/ReadOnlyShardRecovery.java)" = '5208e8503587eb69aeb908a62bfd223b32961583'
+          test "$(git hash-object runtime/java/test/org/oreslang/db/primitive/ReadOnlyShardRecoveryTest.java)" = '9e7f0109fd94dc1a80d4a81689aa7e070b659193'
+          echo "SOURCE_COMMIT=$(git rev-parse HEAD)"
+          echo "SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Strict compile and process-halt WAL candidate replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -version
+          javac -version
+          sha256sum "$(readlink -f "$(command -v java)")" "$(readlink -f "$(command -v javac)")"
+          mkdir -p "$RUNNER_TEMP/readonly-recovery"
+          javac -Xlint:all -Werror -d "$RUNNER_TEMP/readonly-recovery" \
+            runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java \
+            runtime/java/src/org/oreslang/db/primitive/ReadOnlyShardRecovery.java \
+            runtime/java/test/org/oreslang/db/primitive/ReadOnlyShardRecoveryTest.java
+          printf '%s\n' 'HOST_READ_ONLY_SHARD_RECOVERY_PASS checks=44 (full WAL candidate only; NOT durable ACK or resumed writer)' > "$RUNNER_TEMP/expected.txt"
+          for round in 1 2 3 4 5; do
+            timeout 45s java -cp "$RUNNER_TEMP/readonly-recovery" \
+              org.oreslang.db.primitive.ReadOnlyShardRecoveryTest \
+              > "$RUNNER_TEMP/actual.txt"
+            cmp "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt"
+            cat "$RUNNER_TEMP/actual.txt"
+          done
