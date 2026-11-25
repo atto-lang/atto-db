@@ -9,7 +9,7 @@ pub routine main(): void {
 
   // This valid checksum is 0xD5AE01AE, above signed int32 maximum.
   // Its independently computed little-endian trailer is AE 01 AE D5.
-  val large = wal_frame.encode(7, 3, 1, 42, 1, key, zeros);
+  val large = wal_frame.encode(7, 3, 1, 42, 1, borrow! key, borrow! zeros);
   if large.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
   val wire = large.unwrap();
   if wire.length != 1055 ||
@@ -17,7 +17,7 @@ pub routine main(): void {
     wire.get(1053) != 174 || wire.get(1054) != 213; then
     stdio.stdout.write("db:FAILED"); return;
   fi
-  val roundtrip = wal_frame.decode(wire);
+  val roundtrip = wal_frame.decode(borrow! wire);
   if roundtrip.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
   val restored = roundtrip.unwrap();
   if restored.value.length != 1024 || restored.value.get(1023) != 0; then
@@ -28,10 +28,10 @@ pub routine main(): void {
   val List<int> max_key = new List<int>();
   for (let i = 0; i < 64; i++) { max_key.add(107); }
   val max_frame = wal_frame.encode(2147483647, 2147483647,
-    2147483647, 2147483647, 1, max_key, zeros);
+    2147483647, 2147483647, 1, borrow! max_key, borrow! zeros);
   if max_frame.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
   val max_wire = max_frame.unwrap();
-  if max_wire.length != 1118 || wal_frame.decode(max_wire).is_err(); then
+  if max_wire.length != 1118 || wal_frame.decode(borrow! max_wire).is_err(); then
     stdio.stdout.write("db:FAILED"); return;
   fi
 
@@ -49,20 +49,20 @@ pub routine main(): void {
   trailing.add(0);
   val List<int> bad_key = new List<int>();
   bad_key.add(-1);
-  if !wal_frame.decode(bad_id).is_err() ||
-    !wal_frame.decode(trailing).is_err() ||
-    !wal_frame.decode(invalid_byte).is_err() ||
-    !wal_frame.encode(7, 3, 1, 42, 1, bad_key, zeros).is_err() ||
-    !wal_frame.encode(-1, 3, 1, 42, 1, key, zeros).is_err(); then
+  if !wal_frame.decode(borrow! bad_id).is_err() ||
+    !wal_frame.decode(borrow! trailing).is_err() ||
+    !wal_frame.decode(borrow! invalid_byte).is_err() ||
+    !wal_frame.encode(7, 3, 1, 42, 1, borrow! bad_key, borrow! zeros).is_err() ||
+    !wal_frame.encode(-1, 3, 1, 42, 1, borrow! key, borrow! zeros).is_err(); then
     stdio.stdout.write("db:FAILED"); return;
   fi
 
   // The shortest canonical DELETE record is 31 bytes.
   val List<int> empty = new List<int>();
-  val deleted = wal_frame.encode(7, 3, 2, 43, 2, key, empty);
+  val deleted = wal_frame.encode(7, 3, 2, 43, 2, borrow! key, borrow! empty);
   if deleted.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
   val delete_wire = deleted.unwrap();
-  if delete_wire.length != 31 || wal_frame.decode(delete_wire).is_err(); then
+  if delete_wire.length != 31 || wal_frame.decode(borrow! delete_wire).is_err(); then
     stdio.stdout.write("db:FAILED"); return;
   fi
   stdio.stdout.write("db:wal-boundaries-ok");

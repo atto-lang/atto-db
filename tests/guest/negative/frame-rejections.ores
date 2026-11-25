@@ -5,7 +5,7 @@ pub routine main(): void {
   val List<int> key = new List<int>();
   val List<int> value = new List<int>();
   key.add(107); value.add(118);
-  val good = wal_frame.encode(7, 3, 1, 42, 1, key, value);
+  val good = wal_frame.encode(7, 3, 1, 42, 1, borrow! key, borrow! value);
   if good.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
   val bytes = good.unwrap();
 
@@ -19,22 +19,22 @@ pub routine main(): void {
     if i == 5; then bad_kind.add(3);
     else bad_kind.add(bytes.get(i)); fi
   }
-  if !wal_frame.decode(torn).is_err() ||
-    !wal_frame.decode(corrupted).is_err() ||
-    !wal_frame.decode(bad_kind).is_err() ||
-    !wal_frame.encode(0, 3, 1, 42, 1, key, value).is_err() ||
-    !wal_frame.encode(7, 0, 1, 42, 1, key, value).is_err() ||
-    !wal_frame.encode(7, 3, 0, 42, 1, key, value).is_err() ||
-    !wal_frame.encode(7, 3, 1, 0, 1, key, value).is_err() ||
-    !wal_frame.encode(7, 3, 1, 42, 2, key, value).is_err(); then
+  if !wal_frame.decode(borrow! torn).is_err() ||
+    !wal_frame.decode(borrow! corrupted).is_err() ||
+    !wal_frame.decode(borrow! bad_kind).is_err() ||
+    !wal_frame.encode(0, 3, 1, 42, 1, borrow! key, borrow! value).is_err() ||
+    !wal_frame.encode(7, 0, 1, 42, 1, borrow! key, borrow! value).is_err() ||
+    !wal_frame.encode(7, 3, 0, 42, 1, borrow! key, borrow! value).is_err() ||
+    !wal_frame.encode(7, 3, 1, 0, 1, borrow! key, borrow! value).is_err() ||
+    !wal_frame.encode(7, 3, 1, 42, 2, borrow! key, borrow! value).is_err(); then
     stdio.stdout.write("db:FAILED"); return;
   fi
   val List<int> over_key = new List<int>();
   val List<int> over_value = new List<int>();
   for (let i = 0; i < 65; i++) { over_key.add(97); }
   for (let i = 0; i < 1025; i++) { over_value.add(98); }
-  if !wal_frame.encode(7, 3, 1, 42, 1, over_key, value).is_err() ||
-    !wal_frame.encode(7, 3, 1, 42, 1, key, over_value).is_err(); then
+  if !wal_frame.encode(7, 3, 1, 42, 1, borrow! over_key, borrow! value).is_err() ||
+    !wal_frame.encode(7, 3, 1, 42, 1, borrow! key, borrow! over_value).is_err(); then
     stdio.stdout.write("db:FAILED"); return;
   fi
   stdio.stdout.write("db:wal-rejections-ok");

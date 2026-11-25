@@ -4,7 +4,7 @@ pub routine main(): void {
   val List<int> key = new List<int>();
   val List<int> value = new List<int>();
   key.add(107); value.add(118);
-  val encoded = wal_frame.encode(7, 3, 1, 42, 1, key, value);
+  val encoded = wal_frame.encode(7, 3, 1, 42, 1, borrow! key, borrow! value);
   if encoded.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
   val wire = encoded.unwrap();
   // Independent golden vector, not merely encode/decode self-consistency.
@@ -27,7 +27,7 @@ pub routine main(): void {
       stdio.stdout.write("db:FAILED"); return;
     fi
   }
-  val decoded = wal_frame.decode(wire);
+  val decoded = wal_frame.decode(borrow! wire);
   if decoded.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
   val frame = decoded.unwrap();
   if frame.tenant != 7 || frame.generation != 3 ||
