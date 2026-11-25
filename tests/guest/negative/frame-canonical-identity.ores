@@ -34,10 +34,10 @@ pub routine main(): void {
       b = b + a;
       if b >= 65521; then b = b - 65521; fi
     }
-    forged.set(28, a - (a / 256) * 256);
-    forged.set(29, a / 256);
-    forged.set(30, b - (b / 256) * 256);
-    forged.set(31, b / 256);
+    forged.set(28, a - ((a >> 8) * 256));
+    forged.set(29, a >> 8);
+    forged.set(30, b - ((b >> 8) * 256));
+    forged.set(31, b >> 8);
     if !wal_frame.decode(forged).is_err(); then
       stdio.stdout.write("db:FAILED"); return;
     fi

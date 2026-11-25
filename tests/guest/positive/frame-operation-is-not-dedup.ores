@@ -1,0 +1,26 @@
+// The pure wire codec does NOT implement replay or operation-ID deduplication.
+// Distinct sequence numbers can each carry one repeated operation identifier.
+// A durable actor/ledger MUST reject/reconcile a repeated ID independently.
+// Exact stdout: db:wal-codec-not-dedup-ok.
+import module wal_frame from "../../../src/wal/frame";
+pub routine main(): void {
+  let List<int> key = new List<int>();
+  let List<int> value = new List<int>();
+  key.add(107); value.add(118);
+  val first = wal_frame.encode(7, 3, 1, 42, 1, key, value);
+  val second = wal_frame.encode(7, 3, 2, 42, 1, key, value);
+  if first.is_err() || second.is_err(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  val a = wal_frame.decode(first.unwrap());
+  val b = wal_frame.decode(second.unwrap());
+  if a.is_err() || b.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val fa = a.unwrap();
+  val fb = b.unwrap();
+  if fa.operation_id != 42 || fb.operation_id != 42 ||
+    fa.sequence != 1 || fb.sequence != 2; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  stdio.stdout.write("db:wal-codec-not-dedup-ok");
+  return;
+}

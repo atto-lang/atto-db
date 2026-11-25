@@ -29,10 +29,10 @@ pub routine main(): void {
       b = b + a;
       if b >= 65521; then b = b - 65521; fi
     }
-    modified.set(28, a - (a / 256) * 256);
-    modified.set(29, a / 256);
-    modified.set(30, b - (b / 256) * 256);
-    modified.set(31, b / 256);
+    modified.set(28, a - ((a >> 8) * 256));
+    modified.set(29, a >> 8);
+    modified.set(30, b - ((b >> 8) * 256));
+    modified.set(31, b >> 8);
     if !wal_frame.decode(modified).is_err(); then
       stdio.stdout.write("db:FAILED"); return;
     fi

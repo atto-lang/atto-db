@@ -1,0 +1,50 @@
+// Complete checksum-valid high-bit forgeries for EACH of the four ODB1
+// identity fields. Invalid signed-i31 values must return Err, never trap.
+// Independent Adler32 footer bytes prevent checksum-only false positives.
+// Same .ores fixture for Java, LLVM, WASM, Cranelift, and .NET; not a
+// durability, authentication, filesystem or successful backend proof.
+import module wal_frame from "../../../src/wal/frame";
+pub routine main(): void {
+  let List<int> key = new List<int>();
+  let List<int> value = new List<int>();
+  key.add(107); value.add(118);
+  val encoded = wal_frame.encode(7, 3, 1, 42, 1, key, value);
+  if encoded.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val wire = encoded.unwrap();
+  if wire.length != 32 || wal_frame.decode(wire).is_err(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  for (let attempt = 0; attempt < 4; attempt++) {
+    let List<int> forged = new List<int>();
+    for (const octet of wire) { forged.add(octet); }
+    let int high_byte = 9 + attempt * 4;
+    forged.set(high_byte, 128);
+    let int a = 1;
+    let int b = 0;
+    for (let i = 0; i < 28; i++) {
+      a = a + forged.get(i);
+      if a >= 65521; then a = a - 65521; fi
+      b = b + a;
+      if b >= 65521; then b = b - 65521; fi
+    }
+    forged.set(28, a - ((a >> 8) * 256));
+    forged.set(29, a >> 8);
+    forged.set(30, b - ((b >> 8) * 256));
+    forged.set(31, b >> 8);
+    // Independently calculated bytes at offsets 28..31:
+    // tenant:     A1 02 F0 28
+    // generation: A1 02 F0 26
+    // sequence:   A1 02 F0 24
+    // operation:  A1 02 F0 22
+    if forged.get(28) != 161 || forged.get(29) != 2 ||
+      forged.get(30) != 240 || forged.get(31) != 40 - attempt * 2; then
+      stdio.stdout.write("db:FAILED"); return;
+    fi
+    if !wal_frame.decode(forged).is_err() ||
+      wal_frame.decode(wire).is_err(); then
+      stdio.stdout.write("db:FAILED"); return;
+    fi
+  }
+  stdio.stdout.write("db:wal-highbit-identity-checksums-ok");
+  return;
+}
