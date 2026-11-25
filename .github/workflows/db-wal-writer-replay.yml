@@ -8,6 +8,10 @@ on:
       - 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java'
       - 'runtime/java/test/org/oreslang/db/primitive/WalPrimitiveReplayIntegrationTest.java'
       - 'runtime/java/test/org/oreslang/db/primitive/WalPrimitiveProcessKillReplayTest.java'
+  push:
+    branches:
+      - 'feat/native-db-postsync-crash-replay-stage8-20261031'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -18,11 +22,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Assert checked out exact source head and trusted source blobs
         shell: bash
         env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"

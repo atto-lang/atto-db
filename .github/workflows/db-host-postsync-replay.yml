@@ -6,6 +6,10 @@ on:
       - 'runtime/java/src/org/oreslang/db/primitive/ReadOnlyWalReplay.java'
       - 'runtime/java/test/org/oreslang/db/primitive/WalPostSyncCrashReplayTest.java'
       - 'ci/verify-host-postsync-crash-replay.sh'
+  push:
+    branches:
+      - 'feat/native-db-postsync-crash-replay-stage8-20261031'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -16,10 +20,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Exact pull-request HEAD and source blob
         env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         shell: bash
         run: |
           set -euo pipefail
