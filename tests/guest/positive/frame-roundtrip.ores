@@ -1,0 +1,42 @@
+// Exact guest oracle: "db:wal-roundtrip-ok" (no trailing newline).
+import module wal_frame from "../../../src/wal/frame";
+pub routine main(): void {
+  let List<int> key = new List<int>();
+  let List<int> value = new List<int>();
+  key.add(107); value.add(118);
+  val encoded = wal_frame.encode(7, 3, 1, 42, 1, key, value);
+  if encoded.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val wire = encoded.unwrap();
+  // Independent golden vector, not merely encode/decode self-consistency.
+  // Full bytes for PUT tenant=7 generation=3 seq=1 op=42 key=k value=v.
+  let List<int> golden = new List<int>();
+  golden.add(79); golden.add(68); golden.add(66); golden.add(49);
+  golden.add(1); golden.add(1);
+  golden.add(7); golden.add(0); golden.add(0); golden.add(0);
+  golden.add(3); golden.add(0); golden.add(0); golden.add(0);
+  golden.add(1); golden.add(0); golden.add(0); golden.add(0);
+  golden.add(42); golden.add(0); golden.add(0); golden.add(0);
+  golden.add(1); golden.add(0); golden.add(1); golden.add(0);
+  golden.add(107); golden.add(118);
+  golden.add(33); golden.add(2); golden.add(112); golden.add(31);
+  if wire.length != golden.length; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  for (let i = 0; i < golden.length; i++) {
+    if wire.get(i) != golden.get(i); then
+      stdio.stdout.write("db:FAILED"); return;
+    fi
+  }
+  val decoded = wal_frame.decode(wire);
+  if decoded.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val frame = decoded.unwrap();
+  if frame.tenant != 7 || frame.generation != 3 ||
+    frame.sequence != 1 || frame.operation_id != 42 ||
+    frame.kind != 1 || frame.key.length != 1 ||
+    frame.value.length != 1 ||
+    frame.key.get(0) != 107 || frame.value.get(0) != 118; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  stdio.stdout.write("db:wal-roundtrip-ok");
+  return;
+}

@@ -1,0 +1,42 @@
+// Runtime-negative oracle: every malformed frame must be rejected.
+// Exact guest stdout: "db:wal-rejections-ok" (no trailing newline).
+import module wal_frame from "../../../src/wal/frame";
+pub routine main(): void {
+  let List<int> key = new List<int>();
+  let List<int> value = new List<int>();
+  key.add(107); value.add(118);
+  val good = wal_frame.encode(7, 3, 1, 42, 1, key, value);
+  if good.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val bytes = good.unwrap();
+
+  let List<int> torn = new List<int>();
+  let List<int> corrupted = new List<int>();
+  let List<int> bad_kind = new List<int>();
+  for (let i = 0; i < bytes.length; i++) {
+    if i < bytes.length - 1; then torn.add(bytes.get(i)); fi
+    if i == 26; then corrupted.add(108);
+    else corrupted.add(bytes.get(i)); fi
+    if i == 5; then bad_kind.add(3);
+    else bad_kind.add(bytes.get(i)); fi
+  }
+  if !wal_frame.decode(torn).is_err() ||
+    !wal_frame.decode(corrupted).is_err() ||
+    !wal_frame.decode(bad_kind).is_err() ||
+    !wal_frame.encode(0, 3, 1, 42, 1, key, value).is_err() ||
+    !wal_frame.encode(7, 0, 1, 42, 1, key, value).is_err() ||
+    !wal_frame.encode(7, 3, 0, 42, 1, key, value).is_err() ||
+    !wal_frame.encode(7, 3, 1, 0, 1, key, value).is_err() ||
+    !wal_frame.encode(7, 3, 1, 42, 2, key, value).is_err(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  let List<int> over_key = new List<int>();
+  let List<int> over_value = new List<int>();
+  for (let i = 0; i < 65; i++) { over_key.add(97); }
+  for (let i = 0; i < 1025; i++) { over_value.add(98); }
+  if !wal_frame.encode(7, 3, 1, 42, 1, over_key, value).is_err() ||
+    !wal_frame.encode(7, 3, 1, 42, 1, key, over_value).is_err(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  stdio.stdout.write("db:wal-rejections-ok");
+  return;
+}
