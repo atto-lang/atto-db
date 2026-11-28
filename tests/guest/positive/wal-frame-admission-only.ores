@@ -1,0 +1,47 @@
+// Guest ODB1 validation + accounting ONLY. No runtime I/O or ACK.
+// Exact stdout db:wal-prepared-only-ok (no final newline).
+import module storage_gate from "../../../src/storage/gate";
+import module wal_frame from "../../../src/wal/frame";
+pub routine main(): void {
+  let List<int> key = new List<int>();
+  let List<int> value = new List<int>();
+  key.add(107); value.add(118);
+  val produced = wal_frame.encode(7, 3, 1, 42, 1, key, value);
+  if produced.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val wire = produced.unwrap();
+  let mut gate = storage_gate.new_gate(3);
+
+  // Source DATA cannot substitute another tenant/generation/operation.
+  if gate.admit_frame(8, 3, 42, wire).is_ok() ||
+    gate.admit_frame(7, 4, 42, wire).is_ok() ||
+    gate.admit_frame(7, 3, 43, wire).is_ok() ||
+    gate.queued_or_inflight() != 0; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+
+  let List<int> damaged = new List<int>();
+  for (let i = 0; i < wire.length; i++) {
+    if i == 26; then damaged.add(108);
+    else damaged.add(wire.get(i)); fi
+  }
+  if gate.admit_frame(7, 3, 42, damaged).is_ok() ||
+    gate.queued_or_inflight() != 0; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+
+  val admission = gate.admit_frame(7, 3, 42, wire);
+  if admission.is_err() ||
+    gate.queued_or_inflight() != 1 ||
+    gate.admitted_bytes() != wire.length ||
+    gate.phase(42) != 1 ||
+    gate.admit_frame(7, 3, 42, wire).is_ok(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  if !gate.dispatch(42) || gate.cancel_queued(42) ||
+    !gate.mark_unknown(42) || gate.phase(42) != 3; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  // Neither validation nor dispatch grants a DB durable ACK.
+  stdio.stdout.write("db:wal-prepared-only-ok");
+  return;
+}

@@ -1,0 +1,158 @@
+// Pure single-owner WAL admission/dispatch bookkeeping, no filesystem I/O.
+// This local helper is NOT an authorization gate, WAL, storage actor, ACK,
+// receipt authenticator, or durable transaction. The owning actor must keep
+// the instance sealed in one state schema. Never DATA-transfer this instance.
+import module storage_policy from "./capability";
+import module wal_frame from "../wal/frame";
+define module storage_gate as
+  pub define class AdmissionGate as
+    let int generation;
+    let mut bool closed = false;
+    let mut int used_slots = 0;
+    let mut int used_bytes = 0;
+    let mut int dispatched_operation = 0;
+    let mut List<int> operation_ids = new List<int>();
+    let mut List<int> reserved_bytes = new List<int>();
+    // 0 unused, 1 queued, 2 dispatched, 3 unknown durability outcome.
+    let mut List<int> phases = new List<int>();
+
+    pub constructor(int generation) {
+      if generation <= 0 || generation > 2147483647; do
+        rt fail("db_storage: invalid owner generation");
+      fi
+      self.generation = generation;
+      for (let i = 0; i < 32; i++) {
+        self.operation_ids.add(0);
+        self.reserved_bytes.add(0);
+        self.phases.add(0);
+      }
+    }
+
+    // This checks numeric metadata and reserves *one* bounded slot.
+    // The runtime must authenticate tenant and source generation separately;
+    // a successful result is NOT a permission grant.
+    pub admit(mut self)(int tenant, int message_generation,
+                        int operation_id, int frame_bytes): Result<int, String> {
+      if self.closed; then return Err("owner_closed"); fi
+      if message_generation != self.generation; then
+        return Err("stale_generation");
+      fi
+      val valid = storage_policy.validate_frame_request(
+        tenant, message_generation, operation_id, frame_bytes);
+      if valid.is_err(); then return Err("invalid_request"); fi
+      if self.used_slots >= 32 || frame_bytes > 35776 - self.used_bytes; then
+        return Err("queue_full");
+      fi
+      for (let i = 0; i < 32; i++) {
+        if self.phases.get(i) != 0 &&
+          self.operation_ids.get(i) == operation_id; then
+          return Err("duplicate_operation");
+        fi
+      }
+      for (let i = 0; i < 32; i++) {
+        if self.phases.get(i) == 0; then
+          self.operation_ids.set(i, operation_id);
+          self.reserved_bytes.set(i, frame_bytes);
+          self.phases.set(i, 1);
+          self.used_slots = self.used_slots + 1;
+          self.used_bytes = self.used_bytes + frame_bytes;
+          return Ok(i + 1);
+        fi
+      }
+      return Err("queue_full");
+    }
+
+    // Pure guest-facing ODB1 validation before local slot reservation.
+    // A successful slot is ACCOUNTING ONLY, never a storage capability,
+    // file descriptor, durable receipt, or permission to ACK.
+    pub admit_frame(mut self)(int tenant, int message_generation,
+                              int operation_id, List<int> wire): Result<int, String> {
+      val decoded = wal_frame.decode(wire);
+      if decoded.is_err(); then
+        return Err("invalid_wal_frame");
+      fi
+      val frame = decoded.unwrap();
+      if frame.tenant != tenant || frame.generation != message_generation ||
+        frame.operation_id != operation_id; then
+        return Err("wire_identity_mismatch");
+      fi
+      return self.admit(tenant, message_generation, operation_id, wire.length);
+    }
+
+    // Only one physical storage dispatch at a time per shard. This does
+    // NOT perform I/O and does not authorize a different actor's FD.
+    pub dispatch(mut self)(int operation_id): bool {
+      if self.closed || self.dispatched_operation != 0; then
+        return false;
+      fi
+      for (let i = 0; i < 32; i++) {
+        if self.operation_ids.get(i) == operation_id &&
+          self.phases.get(i) == 1; then
+          self.phases.set(i, 2);
+          self.dispatched_operation = operation_id;
+          return true;
+        fi
+      }
+      return false;
+    }
+
+    // Definitive cancellation is permitted only while still queued.
+    // Release the exact *stored* size, never an untrusted caller byte count.
+    pub cancel_queued(mut self)(int operation_id): bool {
+      if self.closed; then return false; fi
+      for (let i = 0; i < 32; i++) {
+        if self.operation_ids.get(i) == operation_id &&
+          self.phases.get(i) == 1; then
+          self.used_slots = self.used_slots - 1;
+          self.used_bytes = self.used_bytes - self.reserved_bytes.get(i);
+          self.phases.set(i, 0);
+          self.operation_ids.set(i, 0);
+          self.reserved_bytes.set(i, 0);
+          return true;
+        fi
+      }
+      return false;
+    }
+
+    // If dispatched work loses transport/sync certainty, retain slot,
+    // bytes, and the exclusive dispatch fence until authenticated recovery.
+    // In particular there is deliberately NO user-callable commit/ACK.
+    pub mark_unknown(mut self)(int operation_id): bool {
+      if self.closed || self.dispatched_operation != operation_id; then
+        return false;
+      fi
+      for (let i = 0; i < 32; i++) {
+        if self.operation_ids.get(i) == operation_id &&
+          self.phases.get(i) == 2; then
+          self.phases.set(i, 3);
+          return true;
+        fi
+      }
+      return false;
+    }
+
+    // Closing fails closed and does not erase unresolved durable effects.
+    pub close(mut self)(): void {
+      self.closed = true;
+      return;
+    }
+
+    pub phase(int operation_id): int {
+      for (let i = 0; i < 32; i++) {
+        if self.operation_ids.get(i) == operation_id; then
+          return self.phases.get(i);
+        fi
+      }
+      return 0;
+    }
+    pub queued_or_inflight(): int { return self.used_slots; }
+    pub admitted_bytes(): int { return self.used_bytes; }
+    pub active_operation(): int { return self.dispatched_operation; }
+    pub is_closed(): bool { return self.closed; }
+    pub owner_generation(): int { return self.generation; }
+  end
+
+  pub fnc new_gate(int generation): AdmissionGate {
+    return new AdmissionGate(generation);
+  }
+end
