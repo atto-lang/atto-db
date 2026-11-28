@@ -1,0 +1,23 @@
+// Stage 5 transaction actor envelope, deliberately fail-closed.
+// No guest-constructible identity or numeric receipt can authorize a commit.
+// ODB1 supports one record, not a multi-record atomic transaction.
+// This provisional source is NOT compiler-validated or runtime-integrated.
+define isolated actor DbTransactionActor as
+  state {
+    closed: bool = true;
+  }
+
+  // The future actor must hold a SingleRecordTxn in sealed actor state.
+  // A safe runtime sequence is: authenticate -> stage under critical ->
+  // seal -> release state loan -> dispatch async -> await -> verify trusted
+  // storage receipt AND activation generation -> publish -> ACK.
+  // Unknown after dispatch/cancel/close must be reconciled by operation ID.
+  // Until such authority and lowering exist, reject EVERY DATA message.
+  receive(ActorMail<int> mail): void {
+    self.handle_state(critical-write |s| -> {
+      s.closed = true;
+    });
+    self.end();
+    return;
+  }
+end

@@ -1,0 +1,41 @@
+// Executable guest oracle if and only if a pinned compiler actually runs it.
+// This validates a local state machine, NOT a durable commit.
+import module db_single_record_txn from "../../../src/transaction/single_record_gate";
+pub routine main(): void {
+  let mut tx = db_single_record_txn.new_single_record_gate(7, 3, 100);
+  if tx.current_phase() != 0 || tx.held_bytes() != 0 ||
+    tx.outcome_indeterminate() || tx.can_acknowledge(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  if tx.stage(7, 3, 100, 42, 31).is_err() ||
+    tx.current_phase() != 1 || tx.bound_operation() != 42 ||
+    tx.held_bytes() != 31 || tx.can_acknowledge(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  if !tx.seal() || tx.seal() ||
+    !tx.begin_dispatch(3, 42) || tx.begin_dispatch(3, 42) ||
+    tx.abort_before_dispatch() || !tx.outcome_indeterminate() ||
+    tx.current_phase() != 3 || tx.can_acknowledge(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  if !tx.mark_unknown(3, 42) || tx.mark_unknown(3, 42) ||
+    tx.current_phase() != 4 || tx.held_bytes() != 31 ||
+    !tx.outcome_indeterminate(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  tx.close();
+  if !tx.is_closed() || tx.current_phase() != 4 ||
+    tx.held_bytes() != 31 || tx.can_acknowledge() ||
+    tx.abort_before_dispatch(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  let mut queued = db_single_record_txn.new_single_record_gate(7, 4, 101);
+  if queued.stage(7, 4, 101, 43, 1118).is_err() ||
+    !queued.seal() || !queued.abort_before_dispatch() ||
+    queued.current_phase() != 5 || queued.held_bytes() != 0 ||
+    queued.begin_dispatch(4, 43) || queued.stage(7, 4, 101, 44, 31).is_ok(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  stdio.stdout.write("db:single-txn-lifecycle-ok");
+  return;
+}

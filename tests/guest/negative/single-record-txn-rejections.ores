@@ -1,0 +1,49 @@
+// Negative oracle: owner/operation fences, no post-dispatch cancel/ACK.
+import module db_single_record_txn from "../../../src/transaction/single_record_gate";
+pub routine main(): void {
+  let mut tx = db_single_record_txn.new_single_record_gate(7, 3, 100);
+  if tx.stage(8, 3, 100, 42, 31).is_ok() ||
+    tx.stage(7, 4, 100, 42, 31).is_ok() ||
+    tx.stage(7, 3, 101, 42, 31).is_ok() ||
+    tx.stage(7, 3, 100, 0, 31).is_ok() ||
+    tx.stage(7, 3, 100, 42, 30).is_ok() ||
+    tx.stage(7, 3, 100, 42, 1119).is_ok() ||
+    tx.current_phase() != 0 || tx.held_bytes() != 0; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  if tx.begin_dispatch(3, 42) || tx.mark_unknown(3, 42) ||
+    tx.stage(7, 3, 100, 42, 1118).is_err() ||
+    tx.stage(7, 3, 100, 43, 31).is_ok() ||
+    tx.begin_dispatch(3, 42) || tx.mark_unknown(3, 42) ||
+    !tx.seal() || tx.begin_dispatch(4, 42) ||
+    tx.begin_dispatch(3, 43) || !tx.begin_dispatch(3, 42); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  if tx.abort_before_dispatch() || tx.mark_unknown(4, 42) ||
+    tx.mark_unknown(3, 43) || tx.can_acknowledge() ||
+    tx.held_bytes() != 1118 || !tx.outcome_indeterminate(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  tx.close();
+  if tx.current_phase() != 4 || tx.held_bytes() != 1118 ||
+    !tx.outcome_indeterminate() || !tx.is_closed() ||
+    tx.mark_unknown(3, 42) || tx.can_acknowledge(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  let mut empty = db_single_record_txn.new_single_record_gate(7, 3, 102);
+  if !empty.abort_before_dispatch() || empty.seal() ||
+    empty.current_phase() != 5 || empty.stage(7, 3, 102, 9, 31).is_ok(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  let mut closing = db_single_record_txn.new_single_record_gate(7, 3, 103);
+  if closing.stage(7, 3, 103, 9, 31).is_err(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  closing.close();
+  if closing.current_phase() != 5 || closing.held_bytes() != 0 ||
+    closing.begin_dispatch(3, 9) || closing.can_acknowledge(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  stdio.stdout.write("db:single-txn-rejections-ok");
+  return;
+}
