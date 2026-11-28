@@ -1,0 +1,88 @@
+name: WAL v1 Java compiler guest gate
+on:
+  pull_request:
+    paths:
+      - 'src/wal/**'
+      - 'tests/guest/**'
+      - 'ci/verify-native-wal.sh'
+      - '.github/workflows/wal-java-guest.yml'
+  push:
+    branches:
+      - 'hardening/wal-signed-arithmetic-boundaries-20261031'
+      - 'feat/guest-wal-v1-first-slice-20261031'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  java-guest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      DB_EXPECTED_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+      COMPILER_COMMIT: b02efee4c036557278284ca444655e19cd0adc64
+      COMPILER_TREE: 018f14281cb7af30c862c0dd25e1edc364148ca0
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          submodules: false
+      - name: Verify immutable DB revision and independent Git tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DB_EXPECTED_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$DB_EXPECTED_COMMIT"
+          expected_tree="$(curl --fail --silent --show-error --retry 2 "https://api.github.com/repos/atto-lang/atto-db/git/commits/$DB_EXPECTED_COMMIT" | jq -er '.tree.sha')"
+          [[ "$expected_tree" =~ ^[a-f0-9]{40}$ ]]
+          test "$(git rev-parse 'HEAD^{tree}')" = "$expected_tree"
+          test -z "$(git status --porcelain)"
+          printf 'DB_EXPECTED_TREE=%s\n' "$expected_tree" >> "$GITHUB_ENV"
+          printf 'DB_SOURCE_COMMIT=%s\nDB_SOURCE_TREE=%s\n' "$DB_EXPECTED_COMMIT" "$expected_tree"
+      - uses: graalvm/setup-graalvm@27b360dbb857524eaf0b4c4cef364d38e5b4f173
+        with:
+          version: '25.3'
+          java-version: '25'
+          distribution: graalvm
+      - name: Build real public compiler from pinned source without checkout credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          root="$RUNNER_TEMP/wal-compiler"
+          mkdir -p "$root/source" "$root/lib"
+          git -C "$root/source" init -q
+          git -C "$root/source" -c credential.helper= fetch --depth=1 https://github.com/atto-lang/atto-source.java.git "$COMPILER_COMMIT"
+          git -C "$root/source" checkout --detach FETCH_HEAD
+          test "$(git -C "$root/source" rev-parse HEAD)" = "$COMPILER_COMMIT"
+          test "$(git -C "$root/source" rev-parse 'HEAD^{tree}')" = "$COMPILER_TREE"
+          test -z "$(git -C "$root/source" status --porcelain)"
+          printf 'COMPILER_SOURCE_COMMIT=%s\nCOMPILER_SOURCE_TREE=%s\n' "$COMPILER_COMMIT" "$COMPILER_TREE"
+          (cd "$root/source" && mvn -B -ntp -Dmaven.test.skip=true package dependency:copy-dependencies -DincludeScope=runtime -DoutputDirectory="$root/lib")
+          test -z "$(git -C "$root/source" status --porcelain --untracked-files=no)"
+          mapfile -t jars < <(find "$root/source/target" -maxdepth 1 -type f -name 'oreslang-source-*.jar')
+          test "${#jars[@]}" -eq 1
+          cp "${jars[0]}" "$root/compiler.jar"
+          test -s "$root/compiler.jar"
+          test -n "$(find "$root/lib" -maxdepth 1 -type f -name '*.jar' -print -quit)"
+          sha256sum "$root/compiler.jar" "$root"/lib/*.jar "$(readlink -f "$JAVA_HOME/bin/java")" > "$root/compiler.sha256"
+          cat > "$root/atto-jvm" <<'LAUNCHER'
+          #!/bin/bash
+          set -euo pipefail
+          root="$(cd "$(dirname "$0")" && pwd -P)"
+          sha256sum -c "$root/compiler.sha256" >/dev/null
+          exec "$JAVA_HOME/bin/java" --enable-native-access=ALL-UNNAMED -cp "$root/compiler.jar:$root/lib/*" dev.oreslang.launcher.OresMain "$@"
+          LAUNCHER
+          chmod 500 "$root/atto-jvm"
+          sha256sum "$root/compiler.sha256" "$root/atto-jvm"
+          printf 'ORESLANG_BIN=%s\nORESLANG_COMPILER_SHA256=%s\n' "$root/atto-jvm" "$(sha256sum "$root/atto-jvm" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+      - name: Actual guest typecheck and execution with exact stdout oracles
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh ci/verify-native-wal.sh
+          sha256sum -c "$RUNNER_TEMP/wal-compiler/compiler.sha256" >/dev/null
+          test "$(git rev-parse HEAD)" = "$DB_EXPECTED_COMMIT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$DB_EXPECTED_TREE"
+          test -z "$(git status --porcelain)"
+          echo 'JAVA_JVM_GUEST_WAL_ONLY; NO DURABILITY, AOT OR OTHER BACKEND CLAIM'

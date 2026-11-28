@@ -5,25 +5,48 @@ set -eu
 export LC_ALL=C
 : "${ORESLANG_BIN:?absolute path to executable Oreslang compiler required}"
 : "${ORESLANG_COMPILER_SHA256:?independently pinned executable SHA256 required}"
+: "${DB_EXPECTED_COMMIT:?independent exact source commit pin required}"
+: "${DB_EXPECTED_TREE:?independent exact source tree pin required}"
 case "$ORESLANG_BIN" in /*) ;; *) echo "compiler path must be absolute" >&2; exit 2;; esac
 test -x "$ORESLANG_BIN"
 case "$ORESLANG_COMPILER_SHA256" in
   *[!0123456789abcdef]*|"") echo "bad compiler digest" >&2; exit 2 ;;
 esac
 test "${#ORESLANG_COMPILER_SHA256}" -eq 64
+for digest in "$DB_EXPECTED_COMMIT" "$DB_EXPECTED_TREE"; do
+  case "$digest" in *[!0123456789abcdef]*|"") echo "bad source pin" >&2; exit 2;; esac
+  test "${#digest}" -eq 40 || { echo "source pin must be 40 hex chars" >&2; exit 2; }
+done
 printf '%s  %s\n' "$ORESLANG_COMPILER_SHA256" "$ORESLANG_BIN" | sha256sum -c - >/dev/null
 command -v timeout >/dev/null 2>&1
-test -z "$(git status --porcelain)"
+test "$(pwd -P)" = "$(git rev-parse --show-toplevel)" || {
+  echo "must run from repository root" >&2; exit 2;
+}
+test -z "$(git status --porcelain)" || { echo "dirty checkout" >&2; exit 2; }
+actual_commit="$(git rev-parse HEAD)"
+actual_tree="$(git rev-parse 'HEAD^{tree}')"
+test "$actual_commit" = "$DB_EXPECTED_COMMIT" || {
+  echo "source commit pin mismatch" >&2; exit 2;
+}
+test "$actual_tree" = "$DB_EXPECTED_TREE" || {
+  echo "source tree pin mismatch" >&2; exit 2;
+}
 printf 'SOURCE_COMMIT=%s\nSOURCE_TREE=%s\nCOMPILER_BINARY_SHA256=%s\n' \
-  "$(git rev-parse HEAD)" "$(git rev-parse HEAD^{tree})" "$ORESLANG_COMPILER_SHA256"
+  "$actual_commit" "$actual_tree" "$ORESLANG_COMPILER_SHA256"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 run_case() {
   file="$1"
   expected="$2"
   printf 'FIXTURE_SHA256='; sha256sum "$file"
-  timeout 20s "$ORESLANG_BIN" --check "$file" >"$tmp/check.out" 2>"$tmp/check.err"
-  timeout 20s "$ORESLANG_BIN" "$file" >"$tmp/actual" 2>"$tmp/runtime.err"
+  if timeout 20s "$ORESLANG_BIN" --check "$file" >"$tmp/check.out" 2>"$tmp/check.err"; then :; else
+    status=$?; echo "FAILED typecheck: $file (exit $status)" >&2
+    cat "$tmp/check.out" "$tmp/check.err" >&2; exit "$status"
+  fi
+  if timeout 20s "$ORESLANG_BIN" "$file" >"$tmp/actual" 2>"$tmp/runtime.err"; then :; else
+    status=$?; echo "FAILED guest execution: $file (exit $status)" >&2
+    cat "$tmp/actual" "$tmp/runtime.err" >&2; exit "$status"
+  fi
   printf '%s' "$expected" >"$tmp/expected"
   if ! cmp -s "$tmp/expected" "$tmp/actual"; then
     echo "FAILED exact stdout: $file" >&2
@@ -34,4 +57,5 @@ run_case() {
 }
 run_case tests/guest/positive/frame-roundtrip.ores db:wal-roundtrip-ok
 run_case tests/guest/negative/frame-rejections.ores db:wal-rejections-ok
-echo 'GUEST_WAL_CODEC_ONLY_PASS cases=2; NO DURABILITY CLAIM'
+run_case tests/guest/positive/frame-boundaries.ores db:wal-boundaries-ok
+echo 'GUEST_WAL_CODEC_ONLY_PASS cases=3; NO DURABILITY CLAIM'

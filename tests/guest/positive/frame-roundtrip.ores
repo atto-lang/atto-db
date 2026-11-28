@@ -1,15 +1,15 @@
 // Exact guest oracle: "db:wal-roundtrip-ok" (no trailing newline).
 import module wal_frame from "../../../src/wal/frame";
 pub routine main(): void {
-  let List<int> key = new List<int>();
-  let List<int> value = new List<int>();
+  val List<int> key = new List<int>();
+  val List<int> value = new List<int>();
   key.add(107); value.add(118);
-  val encoded = wal_frame.encode(7, 3, 1, 42, 1, key, value);
+  val encoded = wal_frame.encode(7, 3, 1, 42, 1, borrow! key, borrow! value);
   if encoded.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
   val wire = encoded.unwrap();
   // Independent golden vector, not merely encode/decode self-consistency.
   // Full bytes for PUT tenant=7 generation=3 seq=1 op=42 key=k value=v.
-  let List<int> golden = new List<int>();
+  val List<int> golden = new List<int>();
   golden.add(79); golden.add(68); golden.add(66); golden.add(49);
   golden.add(1); golden.add(1);
   golden.add(7); golden.add(0); golden.add(0); golden.add(0);
@@ -27,7 +27,7 @@ pub routine main(): void {
       stdio.stdout.write("db:FAILED"); return;
     fi
   }
-  val decoded = wal_frame.decode(wire);
+  val decoded = wal_frame.decode(borrow! wire);
   if decoded.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
   val frame = decoded.unwrap();
   if frame.tenant != 7 || frame.generation != 3 ||
