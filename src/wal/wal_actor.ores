@@ -1,0 +1,22 @@
+// Provisional native .ores WAL owner boundary. NOT compiler-executed.
+// Fail CLOSED: there is no guest-callable disk capability or commit receipt.
+// The required runtime-issued storage authority is intentionally NOT an
+// actor DATA type. Authenticated awaitable storage I/O and recovery must be
+// implemented in Java/Graal and LLVM before this actor admits writes.
+define isolated actor DbWalActor as
+  state {
+    closed: bool = true;
+  }
+
+  // Every attempted guest message is rejected, and there is no ACK method.
+  // Future implementation: validate runtime context, reserve under
+  // critical/handle_state; exit critical; async append+sync; await; validate
+  // non-forgeable sync evidence and generation; publish then acknowledge.
+  receive(ActorMail<int> mail): void {
+    self.handle_state(critical-write |s| -> {
+      s.closed = true;
+    });
+    self.end();
+    return;
+  }
+end

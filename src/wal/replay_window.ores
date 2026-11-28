@@ -1,0 +1,133 @@
+// Bounded, pure .ores WAL frame-window validation, not filesystem recovery.
+// It NEVER truncates a file, publishes an index mutation, or issues an ACK.
+// A possible torn tail is only a suspicion, NOT permission to discard bytes.
+// The caller must supply an independently trusted durable watermark and an
+// exclusive generation-fenced recovery lease before any physical repair.
+import module wal_frame from "./frame";
+define module wal_replay_window as
+  pub define class ScanResult as
+    pub val int complete_records;
+    pub val int consumed_bytes;
+    pub val int last_sequence;
+    pub val int last_generation;
+    pub val bool pending_tail;
+
+    pub constructor(int complete_records, int consumed_bytes,
+                    int last_sequence, int last_generation,
+                    bool pending_tail) {
+      self.complete_records = complete_records;
+      self.consumed_bytes = consumed_bytes;
+      self.last_sequence = last_sequence;
+      self.last_generation = last_generation;
+      self.pending_tail = pending_tail;
+    }
+  end
+
+  fnc read_u16(List<int> input, int at): int {
+    return input.get(at) + input.get(at + 1) * 256;
+  }
+
+  // Call only after checking the high bit of input[at+3].
+  fnc read_i31(List<int> input, int at): int {
+    return input.get(at) + input.get(at + 1) * 256 +
+      input.get(at + 2) * 65536 + input.get(at + 3) * 16777216;
+  }
+
+  // Inspect one fully present memory window, maximum 32 records / 35776 B.
+  // The first sequence and preceding generation are supplied from trusted
+  // state, not inferred from the possibly attacker-controlled WAL. The
+  // caller must retain the last sequence and generation between windows.
+  // Operation-ID deduplication HERE is only within one window; the actual
+  // durable replay owner must retain a cross-window, cross-checkpoint ledger.
+  pub fnc inspect(int tenant, int first_sequence,
+                  int preceding_generation,
+                  List<int> input): Result<ScanResult, String> {
+    if tenant <= 0 || tenant > 2147483647 ||
+      first_sequence <= 0 || first_sequence > 2147483647 ||
+      preceding_generation < 0 || preceding_generation > 2147483647; then
+      return Err("invalid_replay_context");
+    fi
+    if input.length > 35776; then return Err("window_too_large"); fi
+    for (const byte of input) {
+      if byte < 0 || byte > 255; then return Err("invalid_byte"); fi
+    }
+
+    let int offset = 0;
+    let int records = 0;
+    let int last_sequence = first_sequence - 1;
+    let int last_generation = preceding_generation;
+    let List<int> seen_operations = new List<int>();
+
+    for (let slot = 0; slot < 32; slot++) {
+      if offset < input.length; then
+        let int remaining = input.length - offset;
+        // Without a complete 26-byte header, a suffix cannot be called a
+        // torn record. Never silently skip arbitrary final garbage.
+        if remaining < 26; then return Err("unverified_short_tail"); fi
+        if input.get(offset) != 79 || input.get(offset + 1) != 68 ||
+          input.get(offset + 2) != 66 || input.get(offset + 3) != 49 ||
+          input.get(offset + 4) != 1; then
+          return Err("invalid_magic_or_version");
+        fi
+        let int kind = input.get(offset + 5);
+        if kind != 1 && kind != 2; then return Err("invalid_kind"); fi
+        // Guard signed int32 arithmetic before the 2^24 multiplier.
+        if input.get(offset + 9) > 127 ||
+          input.get(offset + 13) > 127 ||
+          input.get(offset + 17) > 127 ||
+          input.get(offset + 21) > 127; then
+          return Err("invalid_identity_or_sequence");
+        fi
+        let int frame_tenant = read_i31(input, offset + 6);
+        let int generation = read_i31(input, offset + 10);
+        let int sequence = read_i31(input, offset + 14);
+        let int operation_id = read_i31(input, offset + 18);
+        let int key_length = read_u16(input, offset + 22);
+        let int value_length = read_u16(input, offset + 24);
+        if frame_tenant != tenant || generation <= 0 ||
+          operation_id <= 0; then
+          return Err("wrong_tenant_or_invalid_identity");
+        fi
+        if generation < last_generation; then
+          return Err("generation_regression");
+        fi
+        if last_sequence == 2147483647 ||
+          sequence != last_sequence + 1; then
+          return Err("sequence_gap_or_overflow");
+        fi
+        for (const seen of seen_operations) {
+          if seen == operation_id; then return Err("duplicate_operation"); fi
+        }
+        if key_length <= 0 || key_length > 64 ||
+          value_length > 1024 ||
+          (kind == 2 && value_length != 0); then
+          return Err("invalid_length");
+        fi
+        let int frame_length = 30 + key_length + value_length;
+        if remaining < frame_length; then
+          // No complete checksum exists to authenticate these bytes.
+          // This flag is NOT a truncation authorization. A damaged length
+          // could mimic a torn tail. Preserve the original WAL for review.
+          return Ok(new ScanResult(records, offset, last_sequence,
+                                   last_generation, true));
+        fi
+
+        let List<int> frame_bytes = new List<int>();
+        for (let j = 0; j < frame_length; j++) {
+          frame_bytes.add(input.get(offset + j));
+        }
+        let decoded = wal_frame.decode(frame_bytes);
+        if decoded.is_err(); then return Err("invalid_complete_frame"); fi
+        // Checksum and every field are verified by the exact frame codec.
+        seen_operations.add(operation_id);
+        last_sequence = sequence;
+        last_generation = generation;
+        records = records + 1;
+        offset = offset + frame_length;
+      fi
+    }
+    if offset != input.length; then return Err("too_many_records"); fi
+    return Ok(new ScanResult(records, offset, last_sequence,
+                             last_generation, false));
+  }
+end

@@ -1,0 +1,59 @@
+// Pure Oreslang integrity scanning; NOT disk replay or committed data.
+// Exact stdout db:replay-window-ok
+import module wal_frame from "../../../src/wal/frame";
+import module wal_replay_window from "../../../src/wal/replay_window";
+pub routine main(): void {
+  let List<int> key = new List<int>();
+  let List<int> first_value = new List<int>();
+  let List<int> second_value = new List<int>();
+  key.add(107); first_value.add(97); second_value.add(98);
+  let first = wal_frame.encode(7, 3, 12, 100, 1, key, first_value);
+  let second = wal_frame.encode(7, 3, 13, 101, 2, key, new List<int>());
+  let third = wal_frame.encode(7, 4, 14, 102, 1, key, second_value);
+  if first.is_err() || second.is_err() || third.is_err(); then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  val first_bytes = first.unwrap();
+  val second_bytes = second.unwrap();
+  val third_bytes = third.unwrap();
+  let List<int> bytes = new List<int>();
+  for (const b of first_bytes) { bytes.add(b); }
+  for (const b of second_bytes) { bytes.add(b); }
+  for (const b of third_bytes) { bytes.add(b); }
+  let all = wal_replay_window.inspect(7, 12, 3, bytes);
+  if all.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  let scanned = all.unwrap();
+  if scanned.complete_records != 3 ||
+    scanned.consumed_bytes != bytes.length ||
+    scanned.last_sequence != 14 || scanned.last_generation != 4 ||
+    scanned.pending_tail; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+
+  // An empty next window advances nothing, preserving the provided fence.
+  let empty = wal_replay_window.inspect(7, 15, 4, new List<int>());
+  if empty.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  val empty_scan = empty.unwrap();
+  if empty_scan.complete_records != 0 ||
+    empty_scan.last_sequence != 14 ||
+    empty_scan.consumed_bytes != 0 ||
+    empty_scan.pending_tail; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+
+  // Missing final checksum byte: report suspicion, not permission to repair.
+  let List<int> torn = new List<int>();
+  let int keep = first_bytes.length + second_bytes.length +
+    third_bytes.length - 1;
+  for (let i = 0; i < keep; i++) { torn.add(bytes.get(i)); }
+  let candidate = wal_replay_window.inspect(7, 12, 3, torn);
+  if candidate.is_err(); then stdio.stdout.write("db:FAILED"); return; fi
+  let partial = candidate.unwrap();
+  if !partial.pending_tail || partial.complete_records != 2 ||
+    partial.consumed_bytes != first_bytes.length + second_bytes.length ||
+    partial.last_sequence != 13 || partial.last_generation != 3; then
+    stdio.stdout.write("db:FAILED"); return;
+  fi
+  stdio.stdout.write("db:replay-window-ok");
+  return;
+}
